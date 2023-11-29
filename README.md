@@ -19,3 +19,7 @@ Resulting in 3 combined ASVs (cASVs) for E. ferrisi, E. falciformis and E. vermi
 Correlation co-occurrence networks for all known parasite genera.
 For Oxyurida, we do phylogenetic analysis as done for Eimeria in Ferreira et al. 2023.
 Merge ASVs that cluster together.
+
+### rscripts/ 
+- source_pkags.R
+This is the script that loads (and if neccesary installs) the R packages used in the project.
