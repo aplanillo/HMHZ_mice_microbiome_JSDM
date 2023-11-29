@@ -21,5 +21,6 @@ For Oxyurida, we do phylogenetic analysis as done for Eimeria in Ferreira et al.
 Merge ASVs that cluster together.
 
 ### rscripts/ 
-- source_pkags.R
+- <code>source_pkgs.R</code>
+
 This is the script that loads (and if neccesary installs) the R packages used in the project.
