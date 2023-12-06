@@ -1,7 +1,5 @@
-library(tidyr)
-library(phyloseq)
-library(dplyr)
-library(magrittr)
+## load packages
+source("rscripts/source_pkgs.R")
 
 ## the data in object still has a data losing transformation (relative
 ## abundances added up over different amplicons) in @otu_table. We
