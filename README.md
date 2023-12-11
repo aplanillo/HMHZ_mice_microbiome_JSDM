@@ -24,6 +24,9 @@ overall sequencing read numbers) and removing samples with less than
 taxonomic annotations. Manual cASV annotation for some parasite taxa
 (Eimeria and Oxyurida). 
 
+### intermediate_data/ 
+Different datasets created during the cleaning and preparing of the input for the jSDM models.
+
 ### rscripts/ 
 #### helpers
 - <code>source_pkgs.R</code>: Loads (and if neccesary installs) the R
@@ -36,6 +39,7 @@ repository in "rscripts/transformPS.R".
 
 #### the pipeline
 - <code>1_variables.R</code>
+This script prepares the response and explanatory variables for the jSDM analysis.
 
 
 
