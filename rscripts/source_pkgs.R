@@ -5,8 +5,7 @@
 ## PACKAGES
 ####--------------------------------------------####
 
-mylibraries <- c("dplyr", "ggplot2",
-                 "phyloseq", "magrittr")
+mylibraries <- c("dplyr", "ggplot2", "phyloseq", "magrittr", "sf", "terra")
 
 for (i in 1:length(mylibraries)) {
   if(mylibraries[i] %in% rownames(installed.packages()) == FALSE) {install.packages(mylibraries[i])}
