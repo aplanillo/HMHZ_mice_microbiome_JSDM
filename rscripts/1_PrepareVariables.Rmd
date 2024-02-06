@@ -113,3 +113,261 @@ nrow(miceData)
 # [1] 609 mice
 ```
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Extract environmental data
+
+# Preliminary data exploration
+
+```{r prepare workspace}
+source("R/source_packages.R")
+source("R/source_themes.R")
+
+wrkdir <- getwd()
+geoproc_wd <- paste0(wrkdir, "/output/geo_proc")
+
+```
+
+
+### load mice data
+```{r}
+## load mice data
+data_tmp <- read.csv("./data_raw/mice_data_ferreira_202308.csv", row.names = 1) 
+head(data_tmp)
+
+## select spatial data and transform
+spatial_data <- data_tmp %>% 
+  dplyr::select(Mouse_ID, Sex, Longitude, Latitude, Year, HI, Body_Weight, Body_Length, Locality, Transect)
+mice_sf <- st_as_sf(spatial_data, coords = c("Longitude", "Latitude"), crs = 4326) %>% 
+  st_transform(3035)
+# write_sf(mice_sf, "output/data_proc/tmp_locations_mice_3035_20231017.gpkg")
+```
+
+### check data
+```{r}
+# mice_sf <- st_read("output/data_proc/tmp_locations_mice_3035_20231017.gpkg")
+head(mice_sf)
+
+tmap_mode("view")
+
+tm_shape(mice_sf) +
+  tm_dots("Transect", size = 2) +
+  tm_dots("Year", size = 1) +
+  tm_dots("Body_Weight", size = 0.5)
+```
+
+### load env data 100m
+
+
+```{r}
+## make all the same extend and change the NA for zeros when needed
+
+## germany as a cutting template
+germany <- st_read(paste0(geoproc_wd, "/germany_3035.gpkg"))
+german_border <- st_union(germany)
+
+
+## tree cover
+tcd <- rast("output/geo_proc/tcd_2018_100m_3035.tif")
+tcd <- crop(tcd, german_border)
+
+## mipeviousness
+imperv <- rast("output/geo_proc/imperviousness_2018_100m_3035.tif")
+imperv <- crop(imperv, german_border)
+
+## small wood features
+swf <- rast("output/geo_proc/swf_2018_germany_100m_3035.tif")
+swf <- crop(swf, german_border)
+names(swf) <- "swf"
+
+## land use
+clc <- rast("output/geo_proc/clc_2018_germany_100m_3035.tif")
+clc <- crop(clc, german_border)
+names(clc) <- "clc2018"
+
+## distance to paths
+dist_paths <- rast("output/geo_proc/distance_to_paths_2018_100m_3035.tif")
+dist_paths <- crop(dist_paths, german_border)
+
+## distances to roads
+dist_roads <- rast("output/geo_proc/distance_roads_2018_100m_3035.tif")
+dist_roads <- crop(dist_roads, german_border)
+
+## Municipalities
+munic <- rast("output/geo_proc/municipalities_100m_3035.tif")
+munic <- crop(munic, german_border)
+
+## cattle dens
+cattledens <- rast("output/geo_proc/cattle_GVE_densityha_germany_2020_100m_3035.tif")
+cattledens <- crop(cattledens, german_border)
+
+## pig dens
+pigdens <- rast("output/geo_proc/pigs_GVE_densityha_germany_2020_100m_3035.tif")
+imperv <- crop(imperv, german_border)
+
+## poultry dens
+poudens <- rast("output/geo_proc/poultry_GVE_densityha_germany_2020_100m_3035.tif")
+poudens <- crop(poudens, german_border)
+```
+
+
+```{r}
+# reclassify clc table
+clc_newclasses <- read.csv(paste0(geoproc_wd, "/clc_reclassification.csv"))
+head(clc_newclasses)
+unique(clc_newclasses$clc_reclass)
+clc_newclasses$CODE_18 <- as.character(clc_newclasses$CODE_18)
+
+## get table of values in the raster
+clc2 <-clc
+plot(clc2)
+
+clc_data <- as.data.frame(cats(clc2))
+
+## add our new columns
+clc_new <- clc_data %>% 
+  left_join(clc_newclasses, by =c("LABEL3", "CODE_18"))
+
+## assign values of the new columns to a new raster
+clc_fct <- categories(clc2, layer = 1, value = clc_new, active = 7) # column 7 of data: clc_fct without counting the "Values" column
+plot(clc_fct)
+
+## or only the numbered coded factors
+clc_new2 <- clc_new %>% 
+  dplyr::select(Value, clc_fct)
+
+clc_fct2 <- categories(clc2, layer = 1, value = clc_new2, active = 1) # column 7 of data: clc_fct without counting the "Values" column
+plot(clc_fct2)
+
+
+
+
+
+## make a stack
+env_cov <- c(tcd, imperv, swf, clc, clc_fct2, dist_paths, dist_roads, munic, cattledens, pigdens, poudens)
+env_cov
+
+## save stack
+terra::writeRaster(env_cov, paste0(geoproc_wd,"/Envcov_stack_germany_100m_3035.tif"), overwrite = TRUE)
+
+```
+
+## look at data
+```{r}
+terra::plet(env_cov, "imperv")
+
+plot(env_cov$swf)
+plot(mice_sf, add = TRUE, col = "red", pch = 16)
+```
+
+# extract values for mice
+```{r}
+cov_mice <- extract(env_cov, mice_sf)
+
+summary(cov_mice)
+ # write.csv(cov_mice, "./output/data_proc/Table_env_cov_mice.csv", row.names = FALSE)
+```
+
+
+```{r variable correlation}
+## get correlations
+correlations_table <- cov_mice %>% 
+  dplyr::select(-c(ID, clc2018, clc_fct, gem_char))
+
+cor_mice <- cor(correlations_table, use = "pairwise.complete.obs")
+
+RColorBrewer::brewer.pal(n = 8, name = "RdBu")
+
+mycorplot <- ggcorrplot::ggcorrplot(cor_mice, 
+                       type = "lower", 
+                       outline.color = "white",
+                       lab = TRUE,
+                       ggtheme = ggplot2::theme_minimal,
+                       # ggtheme = ggplot2::theme(axis.line = element_line(col = "black")),
+                       # colors = c("#6D9EC1", "white", "#E46726")) +
+                       colors = c("#B2182B", "white", "#2166AC")) +
+  theme(axis.line = element_line(colour = "black"), 
+        plot.background = element_rect(colour = "transparent", fill = "white"))
+  
+
+ggsave(plot = mycorplot, 
+       filename = "./plots/mice_envcov_correlations.png", 
+       dpi = 600, width = 6, height = 6)
+
+```
+
+Explore values
+```{r explore values}
+
+cov_mice_long <- cov_mice %>% 
+  pivot_longer(cols = !c(ID, clc2018, gem_char), 
+               names_to = "variable")
+
+head(cov_mice_long, 20)
+
+## all numerical values
+ggplot(cov_mice_long, aes(x = variable, y = value)) +
+  geom_boxplot()
+
+## distances
+(plotdist <- cov_mice_long %>%
+    filter(variable %in% c("dist_path", "dist_road")) %>%
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#CC99CC", "#996699")) +
+    xlab("") +
+    ylab("Distance (m)") +
+    theme_ap())
+
+
+## covers
+(plotcover <- cov_mice_long %>%
+    filter(variable %in% c("tcd", "swf", "imperv")) %>%
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#999999", "#669900",  "#336600")) +
+    xlab("") +
+    ylab("Cover (%)") +
+    theme_ap())
+
+## livestock density
+(plotlivestock <- cov_mice_long %>% 
+  filter(variable %in% c("cat_dens", "pig_dens", "pou_dens")) %>% 
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#993300", "#CC6600",  "#FFCC99")) +
+    xlab("") +
+    ylab("Livestock units / ha") +
+    ylim(0, 10) +
+    theme_ap())
+
+
+allplots <- ggarrange(plotdist, plotcover, plotlivestock, 
+          labels = c("a", "b", "c"),
+          ncol = 2, nrow = 2)
+
+ggsave(plot = allplots, 
+       filename = "./plots/mice_envcov_rawvalues.png", 
+       dpi = 600, width = 12, height = 10)
+
+```
+
+
+
