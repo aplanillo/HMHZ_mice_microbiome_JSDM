@@ -21,7 +21,7 @@ geoproc_wd <- paste0(wrkdir, "/output/geo_proc")
 ```
 
 
-### load data
+### load german borders
 ```{r load german borders}
 ## german borders
 germany <- st_read("./data/geo_raw/germany_3035.gpkg")
@@ -32,6 +32,7 @@ german_border <- st_union(germany)
 plot(st_geometry(german_border))
 ```
 
+### load raster mosaics (copernicus) and save environmental layers for Germany
 ```{r load copernicus data}
 ## imperviousness 2018 at 10m res
 imp <- rast("D:/Nextcloud/GeoData/data-raw/germany/Imperviousness_density_germany_2018_10m_03035_XXX_tif/IMD_2018_010m_E40N28_03035_v020.tif")
@@ -56,8 +57,13 @@ imp_ger_c <- mask(imp_ger, vect(german_border))
 
 plot(imp_ger_c)
 
+## set NA values (255) to NA 
+imp_ger_c[imp_ger_c == 255] <- NA
+
+
 ## save raster for later use
-writeRaster(imp_ger_c, paste0(geoproc_wd, "/imperviousness_germany_2018_10m_3035.tif"))
+# writeRaster(imp_ger_c, paste0(geoproc_wd, "/imperviousness_germany_2018_10m_3035.tif"))
+# imp_ger_c <- rast( paste0(geoproc_wd, "/imperviousness_germany_2018_10m_3035.tif"))
 ```
 
 
