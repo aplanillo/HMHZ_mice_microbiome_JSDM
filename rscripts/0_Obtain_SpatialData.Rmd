@@ -32,7 +32,11 @@ german_border <- st_union(germany)
 plot(st_geometry(german_border))
 ```
 
-### load raster mosaics (copernicus) and save environmental layers for Germany
+# load raster mosaics and save environmental layers for Germany
+
+
+## imperviousness (copernicus), year 2018, 10 m resolution, epsg; 3035
+
 ```{r load copernicus data}
 ## imperviousness 2018 at 10m res
 imp <- rast("D:/Nextcloud/GeoData/data-raw/germany/Imperviousness_density_germany_2018_10m_03035_XXX_tif/IMD_2018_010m_E40N28_03035_v020.tif")
@@ -58,13 +62,423 @@ imp_ger_c <- mask(imp_ger, vect(german_border))
 plot(imp_ger_c)
 
 ## set NA values (255) to NA 
-imp_ger_c[imp_ger_c == 255] <- NA
+NAflag(imp_ger_c) <- 255
 
+## correct name of raster
+names(imp_ger_c) <- "imperv_perc"
 
 ## save raster for later use
-# writeRaster(imp_ger_c, paste0(geoproc_wd, "/imperviousness_germany_2018_10m_3035.tif"))
+# writeRaster(imp_ger_c, paste0(geoproc_wd, "/imperviousness_germany_2018_10m_3035.tif"), overwrite = TRUE)
 # imp_ger_c <- rast( paste0(geoproc_wd, "/imperviousness_germany_2018_10m_3035.tif"))
 ```
+
+
+## tree cover density (copernicus), year 2018, 10 m resolution, epsg; 3035
+
+```{r}
+tcd_l <- lapply(
+  list.files(
+  path = "D:/Nextcloud/GeoData/data-raw/europe/tree_cover_density_2018_10m_3035/TCD_2018_010m_de_03035_v020",
+  pattern = ".tif$",
+  recursive = TRUE,
+  full.names = TRUE), rast)
+
+tcd_ger <- do.call(terra::mosaic, tcd_l)
+
+tcd_ger_c <- mask(tcd_ger, vect(german_border))
+
+NAflag(tcd_ger_c) <- 255
+names(tcd_ger_c) <- "tcd"
+plot(tcd_ger_c)
+
+writeRaster(tcd_ger_c, paste0(geoproc_wd, "/tcd_germany_2018_10m_3035.tif"), overwrite = TRUE)
+```
+
+
+## corine landcover (copernicus), year 2018, 10 m resolution, epsg; 3035
+
+```{r}
+corine_2018_l <- lapply(
+  list.files(
+  path = "D:/Nextcloud/GeoData/data-raw/germany/Corine_Landcover_2018_25832_shp/300000765_1330.lbm-de2018/lbm-de2018",
+  pattern = ".shp$",
+  recursive = TRUE,
+  full.names = TRUE), st_read)
+
+corine_2018 <- do.call(rbind, corine_2018_l)
+
+corine_2018_3035 <- st_transform(corine_2018, crs(tcd_ger_c))
+
+corine_2018_3035_sub <- corine_2018_3035[,"CLC18"]
+
+corine_2018_ras <- rasterize(corine_2018_3035_sub,
+                             tcd_ger_c,
+                            field = "CLC18",
+                            fun = "max")
+
+corine_2018_ras_c <- mask(corine_2018_ras, germany_3035_sf)
+
+plot(corine_2018_ras_c)
+
+writeRaster(corine_2018_ras_c, here("output", "geo_proc", "corine_landcover_2018_10m_3035.tif"))
+
+```
+
+
+# distance to roads paths 10m
+
+```{r}
+road_list <- lapply(list.files(
+  path = paste("D:", "Nextcloud", "GeoData", "data-raw", "germany", "digital_base_dlm_germany_2022_25832_BKG_shp", "300001721_2890.basis-dlm-aaa_ebenen", "basis-dlm-aaa_ebenen", sep = "/"), 
+  full.names = TRUE,
+  recursive = TRUE, 
+  pattern = "ver01_l.shp$"
+), st_read)
+
+road_ger <- do.call(rbind, road_list)
+
+road_ger_3035 <- road_ger %>% st_transform(crs(imp_ger_c)) %>% mutate(rast = 1) |> dplyr::select(rast)
+
+road_rast <- rasterize(road_ger_3035, imp_ger_c, field = "rast")
+
+road_rast <- writeRaster(road_rast, here("output", "geo_proc", "streets_germany_2018_10m_3035.tif"))
+
+road_dist <- terra::distance(road_rast)
+
+road_dist_c <- crop(road_dist, germany_3035_sf)
+
+road_dist_m <- mask(road_dist, germany_3035_sf)
+
+plot(road_dist_m)
+
+# not: In the south-east are no roads. I checked it twice!!!
+
+writeRaster(road_dist_m, here("output", "geo_proc", "distance_to_streets_germany_2018_10m_3035.tif"), overwrite = TRUE)
+
+```
+
+# distance to paths 10m
+
+```{r}
+# load imperviousness map as template
+
+imp_ger_c <- rast(here("output", "geo_proc", "imperviousness_2018_10m_3035.tif"))
+
+path_list <- lapply(list.files(
+  path = paste("D:", "Nextcloud", "GeoData", "data-raw", "germany", "digital_base_dlm_germany_2022_25832_BKG_shp", "300001721_2890.basis-dlm-aaa_ebenen", "basis-dlm-aaa_ebenen", sep = "/"), 
+  full.names = TRUE,
+  recursive = TRUE, 
+  pattern = "ver02_l.shp$"
+), st_read)
+
+path_ger <- do.call(rbind, path_list)
+
+path_ger_3035 <- path_ger %>% st_transform(crs(imp_ger_c)) %>% mutate(rast = 1) |> dplyr::select(rast)
+
+path_rast <- rasterize(path_ger_3035, imp_ger_c, field = "rast")
+
+path_rast <- writeRaster(path_rast, here("output", "geo_proc", "paths_germany_2018_10m_3035.tif"))
+
+path_dist <- terra::distance(path_rast)
+
+path_dist_c <- crop(path_dist, germany_3035_sf)
+
+path_dist_m <- mask(path_dist, germany_3035_sf)
+
+plot(path_dist_m)
+
+writeRaster(path_dist_m, here("output", "geo_proc", "distance_to_paths_germany_2018_10m_3035.tif"), overwrite = TRUE)
+
+```
+
+
+
+# dwd https://opendata.dwd.de
+
+```{r}
+### this is working
+# f <- basename(url)
+# download.file(url, f, mode="wb")
+# y <- rast(f)
+# 
+# plot(y)
+
+### monthly precipitation data
+url <- 'https://opendata.dwd.de/climate_environment/CDC/grids_germany/monthly/precipitation/05_May/'
+
+url_names <- readLines(url)
+#url_names[[5]]
+
+list_url <- lapply(5:(length(url_names)-2), function(iter){
+stringi::stri_split(url_names[[iter]], regex = "\\\"")[[1]][2]})
+
+list_links <- lapply(list_url, function(x){
+  f <- basename(glue::glue(url, x))
+  download.file(glue::glue(url, x), here("data_raw", "prec_may_2023", f), mode="wb")
+  R.utils::gunzip(here("data_raw", "prec_may_2023", f), remove=FALSE)
+  
+  ras <- rast(here("data_raw", "prec_may_2023", gsub(".gz", "", f)),
+              crs = 31467)
+})
+
+ras_prec_mean <- do.call(mean, list_links)
+
+plot(ras_prec_mean)
+
+
+# yearly data
+url <- "https://opendata.dwd.de/climate_environment/CDC/grids_germany/annual/precipitation/grids_germany_annual_precipitation_202217.asc.gz"
+f <- basename(url)
+download.file(url, here("data_raw", "prec_2022", f), mode="wb")
+R.utils::gunzip(here("data_raw", "prec_2022", f), remove=FALSE)
+  
+ras <- rast(here("data_raw", "prec_2022", gsub(".gz", "", f)))
+crs(ras) <- st_crs(31467)$wkt
+
+plet(ras, tiles = "Streets")
+```
+
+# dwd soil moisture
+
+
+
+```{r}
+url <- "https://opendata.dwd.de/climate_environment/CDC/grids_germany/multi_annual/soil_moist/grids_germany_multi_annual_soil_moist_1991-2020_12.asc.gz"
+f <- basename(url)
+download.file(url, here("data_raw", "geo_raw",  "soil_moisture_2023", f), mode="wb")
+R.utils::gunzip(here("data_raw", "geo_raw",  "soil_moisture_2023", f), remove=FALSE)
+
+ras_mois <- rast(here("data_raw", "geo_raw",  "soil_moisture_2023", gsub(".gz", "", f)))
+crs(ras_mois) <- st_crs(31467)$wkt
+
+plet(ras_mois, tiles = "Streets")
+```
+
+# thünen soil ph
+
+https://atlas.thuenen.de/layers/pH_map_30_100:geonode:pH_map_30_100
+
+# looks like data has some gaps
+
+```{r}
+soil_ph <- rast(here("data_raw", "geo_raw", "soil_ph_2021", "result.tiff"))
+soil_ph
+plet(soil_ph, tiles = "Streets")
+```
+
+# bgr soil fertality
+
+https://geoportal.bgr.de/mapapps/resources/apps/geoportal/index.html?lang=de#/geoviewer?metadataId=1C23BDC2-C77F-4581-911A-BCDBF54ECEC5
+
+```{r}
+soil_fert <- rast(here("data_raw", "geo_raw", "soil_fertility", "sqr1000_250_v10", "sqr1000_250_v10.tif"))
+soil_fert
+plet(soil_fert, tiles = "Streets")
+```
+
+# bgr soil type
+
+https://geoportal.bgr.de/mapapps/resources/apps/geoportal/index.html?lang=de#/geoviewer
+
+```{r}
+soil_type <- st_read(here("data_raw", "geo_raw", "soil_types", "buek1000en_v21", "buek1000en_v21.shp"))
+
+leaflet::leaflet(soil_type %>% dplyr::select("LBA") |> st_transform(4326)) %>% 
+  leaflet::addTiles() %>% 
+  leaflet::addPolygons()
+```
+
+# soil data geodata package
+
+```{r}
+# install.packages("geodata")
+# library(geodata)
+# 
+# soil_world(var = "phh2o", depth = 5, stat="mean", path = here("data_raw", "geo_raw", "soil_ph_geodata_pkg"))
+
+soil_ph <- rast(here("data_raw", "geo_raw", "soil_ph_geodata_pkg", "soil_world", "phh2o_0-5cm_mean_30s.tif"))
+
+plet(soil_ph, tiles = "Streets")
+
+soil_ph_c <- crop(soil_ph, germany_3035_sf |> st_transform(4326))
+  
+plet(soil_ph_c, tiles = "Streets")
+
+soil_ph_3035 <- project(soil_ph_c, imp_ger_c)
+
+
+```
+
+
+
+
+
+
+
+# thuenen livestock data
+
+Jahr 2020, 
+Landwirtschaftliche Fläche (Code UAAR) in 1000 ha, ANTO: 
+
+Großvieheinheiten in 1000 GVE; 
+      CATO: Rinder; 
+      PITO: Schweine; 
+      POTO: Geflügel; 
+      RETO: Andere Tiere; 
+      DCOW: Milchvieh; 
+      SCOW: Mutterkühe; 
+      BULL: Rindermast; 
+      CALV: Kälber; 
+      HEIT: Färsen; 
+      SOWS: Ferkel und Zuchtsauen; 
+      PIGF: Mastschweine; 
+      HENS: Hennen; 
+      POUF: Mastgeflügel; 
+      SHGM: Schafe und Ziegen; 
+      OANI: Andere Tiere (Pferde)
+       alle Tiere ebenfalls in 1000 GVE, Geflügel in 1000000 GVE
+
+translation: 
+
+Livestock units in 1000 GVE; 
+**This value represents the amount of livestock measured in "1000 livestock units" (1000000 units for poultry)**
+Cannot be transformed into real animal numbers, but should be comparable across regions.
+To obtain a density, we should divide this number by the area.
+      ANTO: all livestock
+      CATO: Cattle; the sum of all cattle related subclasses
+      PITO: Pigs; the sum of all pig related subclasses
+      POTO: Poultry; the sum of all poultry related subclasses
+      RETO: other animals; 
+      DCOW: Dairy cattle; 
+      SCOW: Mother cows; 
+      BULL: Beef fattening; 
+      CALV: calf; 
+      HEIT: Heifers; 
+      SOWS: Piglets und Breeding sows; 
+      PIGF: Fattening pigs; 
+      HENS: Hens; 
+      POUF: Poultry for fattening; 
+      SHGM: Sheeps und Goats; 
+      OANI: other animals (Horses)  
+     all animals in 1000 GVE, Poultry in 1000000 GVE
+
+
+Definition german: Grundlage ist das Lebendgewicht. Eine Großvieheinheit entspricht etwa dem Gewicht eines ausgewachsenen 500 Kilogramm schweren Rindes.
+
+Beispiele:
+
+    Kalb = 0 4 GV
+    junge Kuh = 0 6 GV
+    Eber = 0 3 GV
+    Mastschwein = 0 12 GV
+    Ferkel = 0 01 GV
+    Pferd = 1 GV
+    Schaf = 0 1 GV
+    Legehenne = 1 durch 320 GV.
+
+
+https://www.ima-agrar.de/wissen/agrilexikon/grossvieheinheit-gv
+
+Definition english: The basis is the live weight. A livestock unit is roughly equivalent to the weight of a full-grown 500-kilogram cow. 
+
+Example:
+
+    calf = 0 4 GV
+    young cow Kuh = 0 6 GV
+    wild boar = 0 3 GV
+    pig = 0 12 GV
+    pglet = 0 01 GV
+    horse = 1 GV
+    sheep = 0 1 GV
+    laying hen = 1 durch 320 GV.
+
+
+
+```{r}
+livestock <- st_read(here("data_raw", "geo_raw", "thuenen_livestock",
+                          "Gemeinde_Tiere_LU_2020_EXT_MWM_01_2023-09-18_09-37-30.shp")) %>% 
+#                      ) %>% 
+#    mutate(gem_name = gsub("([][|(.)\\^{}+$*?])", "ue", gem_name)) %>% 
+# mutate(gem_name = gsub("Â¼", "", gem_name)) %>% 
+# mutate(gem_name = gsub("Ã", "", gem_name)) %>% 
+  st_transform(4326)
+
+
+leaflet::leaflet(livestock[,7]) %>% 
+  leaflet::addTiles() %>% 
+  leaflet::addPolygons()
+
+plot(livestock[,"ANTO"])
+
+
+
+
+## i got communities data from destatis but the match does not work, maybe the livestock data has a very old data basis....
+
+# commies <- read_delim(here("data_raw", "communitie_list", "GV100AD3108", "GV100AD_310823.txt"), col_names = FALSE)
+
+commies <- readxl::read_xlsx(here("data_raw", 
+                                  "communitie_list",
+                                  "31122010_Auszug_GV.xlsx"),
+                             sheet = 2,
+                             skip = 5,
+                             col_names = c("Satzart",
+                                           "txt_kenn",
+                                           "RS_Land",
+                                           "RS_RB",
+                                           "RS_Kreis",
+                                           "RS_VB",
+                                           "RS_Gem",
+                                           "gem_name",
+                                           "flaeche_km2",
+                                           "Bev_insgesamt",
+                                           "Bev_maennl",
+                                           "Bev_weibl",
+                                           "Bev_je_km2",
+                                           "PLZ",
+                                           "lon",
+                                           "lat")) |> 
+  mutate(id = 1:n()) |> 
+  drop_na(c(RS_Land, RS_RB, RS_Kreis, RS_Gem)) |> 
+  group_by(id) |> 
+  mutate(gem_char = paste0(RS_Land, RS_RB, RS_Kreis, RS_Gem)) |> 
+  ungroup()
+
+livestock_fixed <- livestock |> 
+  select(-gem_name) |>
+  left_join(commies |> 
+              select(gem_char, gem_name), 
+            by = "gem_char")
+   
+
+
+leaflet::leaflet(livestock_fixed %>% 
+                   st_transform(4326)) %>% 
+  leaflet::addPolygons() %>% 
+  leaflet::addTiles()
+
+st_write(livestock_fixed, here( "output", "geo_proc", "livestock_de_2020_vector_4326.gpkg"))
+
+livestock_fixed <- st_read(here( "output", "geo_proc", "livestock_de_2020_vector_4326.gpkg"))
+
+
+livestock_fixed %>% 
+  filter(gem_name == "Berlin, Stadt")
+
+livestock %>% 
+  filter(gem_name == "Berlin")
+
+```
+
+# thuenen crop data
+
+```{r}
+crops <- st_read(here("data_raw", "geo_raw","thuenen_livestock",
+                          "Gemeinde_Pflanzen_LEVL_2020_EXT_MWM_01_2023-09-18_10-04-11.shp"))
+```
+
+
+
 
 
 
