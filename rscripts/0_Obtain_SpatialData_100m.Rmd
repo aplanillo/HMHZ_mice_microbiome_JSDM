@@ -17,7 +17,6 @@ knitr::opts_chunk$set(echo = TRUE)
 source("./rscripts/source_pkgs.R")
 
 wrkdir <- getwd()
-
 geoproc_wd <- paste0(wrkdir, "/output/geo_proc")
 ```
 
@@ -53,12 +52,12 @@ imp_l <- lapply(
 imp_ger <- do.call(terra::mosaic, imp_l)
 
 ## cut to German borders
-imp_ger_c <- mask(imp_ger, germany_3035_sf)
+imp_ger_c <- mask(imp_ger, vect(german_border))
 
 plot(imp_ger_c)
 
 ## save raster for later use
-writeRaster(imp_ger_c, paste0(geoproc_wd, "/imperviousness_2018_10m_3035.tif"))
+writeRaster(imp_ger_c, paste0(geoproc_wd, "/imperviousness_germany_2018_10m_3035.tif"))
 ```
 
 
