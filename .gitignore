@@ -6,3 +6,5 @@
 *.R~
 
 mynotes/
+data/geo_raw/
+output/geo_proc/
