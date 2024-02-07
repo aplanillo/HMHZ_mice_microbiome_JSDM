@@ -91,11 +91,12 @@ NAflag(tcd_ger_c) <- 255
 names(tcd_ger_c) <- "tcd"
 plot(tcd_ger_c)
 
-writeRaster(tcd_ger_c, paste0(geoproc_wd, "/tcd_germany_2018_10m_3035.tif"), overwrite = TRUE)
+# writeRaster(tcd_ger_c, paste0(geoproc_wd, "/tcd_germany_2018_10m_3035.tif"), overwrite = TRUE)
+# tcd_ger_c <- rast( paste0(geoproc_wd, "/tcd_germany_2018_10m_3035.tif"))
 ```
 
 
-## corine landcover (copernicus), year 2018, 10 m resolution, epsg; 3035
+## corine landcover (copernicus), year 2018, polygon file, epsg; 25832 to epsg:3035
 
 ```{r}
 corine_2018_l <- lapply(
@@ -107,25 +108,36 @@ corine_2018_l <- lapply(
 
 corine_2018 <- do.call(rbind, corine_2018_l)
 
+## correct crs
 corine_2018_3035 <- st_transform(corine_2018, crs(tcd_ger_c))
 
 corine_2018_3035_sub <- corine_2018_3035[,"CLC18"]
 
+## rasterize using tcd as template
 corine_2018_ras <- rasterize(corine_2018_3035_sub,
                              tcd_ger_c,
-                            field = "CLC18",
+                            field = "CLC18", 
                             fun = "max")
 
-corine_2018_ras_c <- mask(corine_2018_ras, germany_3035_sf)
-
+corine_2018_ras_c <- mask(corine_2018_ras, german_border)
+values(corine_2018_ras_c)
+names(corine_2018_ras_c) <- "clc2018"
 plot(corine_2018_ras_c)
 
-writeRaster(corine_2018_ras_c, here("output", "geo_proc", "corine_landcover_2018_10m_3035.tif"))
-
+# writeRaster(corine_2018_ras_c, paste0(geoproc_wd, "/clc_germany_2018_10m_3035.tif"), overwrite = TRUE)
+# corine_2018_ras_c <- rast(paste0(geoproc_wd, "/clc_germany_2018_10m_3035.tif"))
 ```
 
 
-# distance to roads paths 10m
+# distance to roads 10m
+
+This data was obtained from https://gdz.bkg.bund.de
+https://gdz.bkg.bund.de/index.php/default/digitale-geodaten/digitale-landschaftsmodelle.html?___store=default
+Digitales Basis-Landschaftsmodell (Ebenen) (Basis-DLM) 
+
+**This source costs money and it is not publicly available**
+PROBLEMS WITH PUBLICATIONS?? -- CHECK FOR OPEN ACCESS SOURCES!!
+
 
 ```{r}
 road_list <- lapply(list.files(
@@ -137,32 +149,26 @@ road_list <- lapply(list.files(
 
 road_ger <- do.call(rbind, road_list)
 
-road_ger_3035 <- road_ger %>% st_transform(crs(imp_ger_c)) %>% mutate(rast = 1) |> dplyr::select(rast)
-
+road_ger_3035 <- road_ger %>% st_transform(crs(imp_ger_c)) %>% mutate(rast = 1) %>% dplyr::select(rast)
 road_rast <- rasterize(road_ger_3035, imp_ger_c, field = "rast")
 
-road_rast <- writeRaster(road_rast, here("output", "geo_proc", "streets_germany_2018_10m_3035.tif"))
-
 road_dist <- terra::distance(road_rast)
-
-road_dist_c <- crop(road_dist, germany_3035_sf)
-
-road_dist_m <- mask(road_dist, germany_3035_sf)
-
+road_dist_c <- crop(road_dist, german_border)
+road_dist_m <- mask(road_dist, german_border)
 plot(road_dist_m)
 
-# not: In the south-east are no roads. I checked it twice!!!
-
-writeRaster(road_dist_m, here("output", "geo_proc", "distance_to_streets_germany_2018_10m_3035.tif"), overwrite = TRUE)
-
+# not: In the south-east are no roads. 
+writeRaster(road_dist_m, paste0(geoproc_wd, "/distance_to_roads_germany_2018_10m_3035.tif"), overwrite = TRUE)
 ```
+
 
 # distance to paths 10m
 
-```{r}
-# load imperviousness map as template
+SAME ORIGIN AS LAYER ABOVE!!
 
-imp_ger_c <- rast(here("output", "geo_proc", "imperviousness_2018_10m_3035.tif"))
+```{r}
+# USE imperviousness map as template
+imp_ger_c 
 
 path_list <- lapply(list.files(
   path = paste("D:", "Nextcloud", "GeoData", "data-raw", "germany", "digital_base_dlm_germany_2022_25832_BKG_shp", "300001721_2890.basis-dlm-aaa_ebenen", "basis-dlm-aaa_ebenen", sep = "/"), 
@@ -172,28 +178,29 @@ path_list <- lapply(list.files(
 ), st_read)
 
 path_ger <- do.call(rbind, path_list)
-
-path_ger_3035 <- path_ger %>% st_transform(crs(imp_ger_c)) %>% mutate(rast = 1) |> dplyr::select(rast)
+path_ger_3035 <- path_ger %>% st_transform(crs(imp_ger_c)) %>% mutate(rast = 1)  %>% dplyr::select(rast)
 
 path_rast <- rasterize(path_ger_3035, imp_ger_c, field = "rast")
 
-path_rast <- writeRaster(path_rast, here("output", "geo_proc", "paths_germany_2018_10m_3035.tif"))
-
 path_dist <- terra::distance(path_rast)
-
-path_dist_c <- crop(path_dist, germany_3035_sf)
-
-path_dist_m <- mask(path_dist, germany_3035_sf)
+path_dist_c <- crop(path_dist, german_border)
+path_dist_m <- mask(path_dist, german_border)
 
 plot(path_dist_m)
-
-writeRaster(path_dist_m, here("output", "geo_proc", "distance_to_paths_germany_2018_10m_3035.tif"), overwrite = TRUE)
-
+writeRaster(path_dist_m,  paste0(geoproc_wd, "/distance_to_paths_germany_202218_10m_3035.tif"), overwrite = TRUE)
 ```
 
 
 
 # dwd https://opendata.dwd.de
+
+Precipitation data, obtained from the Deutscher Wetterdients
+https://opendata.dwd.de
+More info in:
+https://www.dwd.de/EN/ourservices/opendata/opendata.html
+
+DWD should be cited as the source of data:
+https://www.dwd.de/EN/service/copyright/templates_dwd_as_source.html?nn=495490
 
 ```{r}
 ### this is working
@@ -240,8 +247,7 @@ plet(ras, tiles = "Streets")
 
 # dwd soil moisture
 
-
-
+SAME SOURCE AS ABOVE
 ```{r}
 url <- "https://opendata.dwd.de/climate_environment/CDC/grids_germany/multi_annual/soil_moist/grids_germany_multi_annual_soil_moist_1991-2020_12.asc.gz"
 f <- basename(url)
@@ -254,17 +260,19 @@ crs(ras_mois) <- st_crs(31467)$wkt
 plet(ras_mois, tiles = "Streets")
 ```
 
+
 # thünen soil ph
 
 https://atlas.thuenen.de/layers/pH_map_30_100:geonode:pH_map_30_100
 
-# looks like data has some gaps
+### looks like data has some gaps
 
 ```{r}
 soil_ph <- rast(here("data_raw", "geo_raw", "soil_ph_2021", "result.tiff"))
 soil_ph
 plet(soil_ph, tiles = "Streets")
 ```
+
 
 # bgr soil fertality
 
