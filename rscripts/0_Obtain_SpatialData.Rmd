@@ -131,6 +131,8 @@ plot(corine_2018_ras_c)
 
 # distance to roads 10m
 
+Distance to asphalted roads
+
 This data was obtained from https://gdz.bkg.bund.de
 https://gdz.bkg.bund.de/index.php/default/digitale-geodaten/digitale-landschaftsmodelle.html?___store=default
 Digitales Basis-Landschaftsmodell (Ebenen) (Basis-DLM) 
@@ -166,6 +168,8 @@ plot(road_dist_m)
 
 # distance to paths 10m
 
+Distance to hiking / cycling paths
+
 SAME ORIGIN AS LAYER ABOVE!!
 
 ```{r}
@@ -189,12 +193,17 @@ path_dist_c <- crop(path_dist, german_border)
 path_dist_m <- mask(path_dist, german_border)
 
 plot(path_dist_m)
-writeRaster(path_dist_m,  paste0(geoproc_wd, "/distance_to_paths_germany_202218_10m_3035.tif"), overwrite = TRUE)
+# writeRaster(path_dist_m,  paste0(geoproc_wd, "/distance_to_paths_germany_XXXX_10m_3035.tif"), overwrite = TRUE)
+# path_dist_m <- rast(paste0(geoproc_wd, "/distance_to_paths_germany_XXXX_10m_3035.tif"))
 ```
 
 
 
 # dwd https://opendata.dwd.de
+
+Resolution: 1 km, crs = 31467
+
+Monthly total precipitation (l/m2)
 
 Precipitation data, obtained from the Deutscher Wetterdients
 https://opendata.dwd.de
@@ -213,7 +222,7 @@ https://www.dwd.de/EN/service/copyright/templates_dwd_as_source.html?nn=495490
 # plot(y)
 
 ### monthly precipitation data
-url <- 'https://opendata.dwd.de/climate_environment/CDC/grids_germany/monthly/precipitation/05_May/'
+url <- 'https://opendata.dwd.de/climate_environment/CDC/grids_germany/monthly/precipitation/08_Aug/'
 
 url_names <- readLines(url)
 #url_names[[5]]
@@ -221,45 +230,65 @@ url_names <- readLines(url)
 list_url <- lapply(5:(length(url_names)-2), function(iter){
 stringi::stri_split(url_names[[iter]], regex = "\\\"")[[1]][2]})
 
-list_links <- lapply(list_url, function(x){
-  f <- basename(glue::glue(url, x))
-  download.file(glue::glue(url, x), here("data_raw", "prec_may_2023", f), mode="wb")
-  R.utils::gunzip(here("data_raw", "prec_may_2023", f), remove=FALSE)
-  
-  ras <- rast(here("data_raw", "prec_may_2023", gsub(".gz", "", f)),
-              crs = 31467)
-})
+url_df <- as.data.frame(do.call("rbind", list_url))
+names(url_df) <- "url"
 
-ras_prec_mean <- do.call(mean, list_links)
-
-plot(ras_prec_mean)
+my_years <- c("2015", "2016", "2017", "2018")
+my_urls <- url_df %>% 
+  filter(stringr::str_detect(url, pattern = paste(my_years, collapse = "|")))
+my_urls
 
 
-# yearly data
-url <- "https://opendata.dwd.de/climate_environment/CDC/grids_germany/annual/precipitation/grids_germany_annual_precipitation_202217.asc.gz"
-f <- basename(url)
-download.file(url, here("data_raw", "prec_2022", f), mode="wb")
-R.utils::gunzip(here("data_raw", "prec_2022", f), remove=FALSE)
-  
-ras <- rast(here("data_raw", "prec_2022", gsub(".gz", "", f)))
-crs(ras) <- st_crs(31467)$wkt
+glue::glue(url, my_urls[1,])
+## download data
+for(i in 1:nrow(my_urls)){
+  download.file(glue::glue(url, my_urls[i,]), 
+                destfile = paste0( "./data/geo_raw/prec/", my_urls[i,]), mode="wb")
+  R.utils::gunzip(paste0("./data/geo_raw/prec/", my_urls[i,]), remove=FALSE)
 
-plet(ras, tiles = "Streets")
+}
+
+## load downloaded files 
+my_files <- list.files("./data/geo_raw/prec/", pattern = paste(my_years, collapse = "|"), full.names = TRUE)
+my_files <- my_files[!grepl(".gz", my_files)]
+
+prec_rasters <- rast(my_files)
+names(prec_rasters) <- paste0("prec_aug_", my_years)  
+crs(prec_rasters) <- "epsg:31467"
+
+plot(prec_rasters$prec_aug_2015)
+plot(prec_rasters$prec_aug_2016)
+plot(prec_rasters$prec_aug_2017)
+plot(prec_rasters$prec_aug_2018)
+
+res(prec_rasters)
 ```
 
 # dwd soil moisture
 
 SAME SOURCE AS ABOVE
+
+Description:
+
+Soil moisture is shown as a percentage of effective field capacity ( %nFK) for winter grain on lighter soils and for sugar beet on heavier soils, in each case for every month, season and year.
+
+The effective field capacity (nFK) designates the volume of water already in the soil and which is available for the plants growing on it. Below a value of 50%nFK, plants must be assumed to suffer water stress. Values of over 100%nFK mean that soils are oversaturated. The calculations are made on a monthly basis for the entire calendar year even if no plants at all are growing on the monitored fields at certain times.
+
+Values are based on calculations made useing the tried and tested SVAT model AMBAV. The AMBAV model uses the classic Penman-Monteith equation (Click here for more information). This model is routinely used in agrometeorological consulting work (e.g. irrigation advice). AMBAV results for the future are currently only available for 16 of the regional climate models (14 numerical and 2 statistical models). The input data needed for some calculations is unavailable for the remaining five models. The depiction of the trend for the average in Germany includes the results from 14 numerical models and the results from 2 statistical models.
+
 ```{r}
 url <- "https://opendata.dwd.de/climate_environment/CDC/grids_germany/multi_annual/soil_moist/grids_germany_multi_annual_soil_moist_1991-2020_12.asc.gz"
 f <- basename(url)
-download.file(url, here("data_raw", "geo_raw",  "soil_moisture_2023", f), mode="wb")
-R.utils::gunzip(here("data_raw", "geo_raw",  "soil_moisture_2023", f), remove=FALSE)
+download.file(url, paste0("./data/geo_raw/soil_moisture/", f), mode="wb")
+R.utils::gunzip(paste0("./data/geo_raw/soil_moisture/", f), remove=FALSE)
 
-ras_mois <- rast(here("data_raw", "geo_raw",  "soil_moisture_2023", gsub(".gz", "", f)))
-crs(ras_mois) <- st_crs(31467)$wkt
+f_2 <-  gsub(".gz", "", f)
+ras_moist <- rast(paste0("./data/geo_raw/soil_moisture/", f_2))
 
-plet(ras_mois, tiles = "Streets")
+crs(ras_moist) <- st_crs(31467)$wkt
+
+plot(ras_moist)
+plet(ras_moist, tiles = "Streets")
 ```
 
 
@@ -267,65 +296,25 @@ plet(ras_mois, tiles = "Streets")
 
 https://atlas.thuenen.de/layers/pH_map_30_100:geonode:pH_map_30_100
 
+Data with about 1 km resolution
 ### looks like data has some gaps
 
 ```{r}
-soil_ph <- rast(here("data_raw", "geo_raw", "soil_ph_2021", "result.tiff"))
+soil_ph <- rast("./data/geo_raw/thuenen_soil_ph_2021.tiff")
 soil_ph
-plet(soil_ph, tiles = "Streets")
+# plet(soil_ph, tiles = "Streets")
+
+# transform to epsg 3035
+soil_ph_3035 <- project(soil_ph, "epsg:3035")
+res(soil_ph)
+res(soil_ph_3035)
+plet(soil_ph_3035, tiles = "Streets")
 ```
-
-
-# bgr soil fertality
-
-https://geoportal.bgr.de/mapapps/resources/apps/geoportal/index.html?lang=de#/geoviewer?metadataId=1C23BDC2-C77F-4581-911A-BCDBF54ECEC5
-
-```{r}
-soil_fert <- rast(here("data_raw", "geo_raw", "soil_fertility", "sqr1000_250_v10", "sqr1000_250_v10.tif"))
-soil_fert
-plet(soil_fert, tiles = "Streets")
-```
-
-# bgr soil type
-
-https://geoportal.bgr.de/mapapps/resources/apps/geoportal/index.html?lang=de#/geoviewer
-
-```{r}
-soil_type <- st_read(here("data_raw", "geo_raw", "soil_types", "buek1000en_v21", "buek1000en_v21.shp"))
-
-leaflet::leaflet(soil_type %>% dplyr::select("LBA") |> st_transform(4326)) %>% 
-  leaflet::addTiles() %>% 
-  leaflet::addPolygons()
-```
-
-# soil data geodata package
-
-```{r}
-# install.packages("geodata")
-# library(geodata)
-# 
-# soil_world(var = "phh2o", depth = 5, stat="mean", path = here("data_raw", "geo_raw", "soil_ph_geodata_pkg"))
-
-soil_ph <- rast(here("data_raw", "geo_raw", "soil_ph_geodata_pkg", "soil_world", "phh2o_0-5cm_mean_30s.tif"))
-
-plet(soil_ph, tiles = "Streets")
-
-soil_ph_c <- crop(soil_ph, germany_3035_sf |> st_transform(4326))
-  
-plet(soil_ph_c, tiles = "Streets")
-
-soil_ph_3035 <- project(soil_ph_c, imp_ger_c)
-
-
-```
-
-
-
-
-
 
 
 # thuenen livestock data
+
+Polygon data, epsg 4326
 
 Jahr 2020, 
 Landwirtschaftliche Fläche (Code UAAR) in 1000 ha, ANTO: 
@@ -405,31 +394,14 @@ Example:
 
 
 ```{r}
-livestock <- st_read(here("data_raw", "geo_raw", "thuenen_livestock",
-                          "Gemeinde_Tiere_LU_2020_EXT_MWM_01_2023-09-18_09-37-30.shp")) %>% 
-#                      ) %>% 
-#    mutate(gem_name = gsub("([][|(.)\\^{}+$*?])", "ue", gem_name)) %>% 
-# mutate(gem_name = gsub("Â¼", "", gem_name)) %>% 
-# mutate(gem_name = gsub("Ã", "", gem_name)) %>% 
-  st_transform(4326)
+livestock <- st_read("./data/geo_raw/thuenen_livestock/Gemeinde_Tiere_LU_2020_EXT_MWM_01_2023-09-18_09-37-30.shp") %>% 
+  st_transform(3035)
 
 
-leaflet::leaflet(livestock[,7]) %>% 
-  leaflet::addTiles() %>% 
-  leaflet::addPolygons()
+## Merge with regional data (obtained from Destatis) 
 
-plot(livestock[,"ANTO"])
-
-
-
-
-## i got communities data from destatis but the match does not work, maybe the livestock data has a very old data basis....
-
-# commies <- read_delim(here("data_raw", "communitie_list", "GV100AD3108", "GV100AD_310823.txt"), col_names = FALSE)
-
-commies <- readxl::read_xlsx(here("data_raw", 
-                                  "communitie_list",
-                                  "31122010_Auszug_GV.xlsx"),
+## load regional data
+commies <- readxl::read_xlsx("./data/geo_raw/thuenen_livestock/31122010_Auszug_GV.xlsx",
                              sheet = 2,
                              skip = 5,
                              col_names = c("Satzart",
@@ -447,29 +419,32 @@ commies <- readxl::read_xlsx(here("data_raw",
                                            "Bev_je_km2",
                                            "PLZ",
                                            "lon",
-                                           "lat")) |> 
-  mutate(id = 1:n()) |> 
-  drop_na(c(RS_Land, RS_RB, RS_Kreis, RS_Gem)) |> 
-  group_by(id) |> 
-  mutate(gem_char = paste0(RS_Land, RS_RB, RS_Kreis, RS_Gem)) |> 
+                                           "lat")) %>%  
+  mutate(id = 1:n()) %>% 
+  drop_na(c(RS_Land, RS_RB, RS_Kreis, RS_Gem)) %>% 
+  group_by(id) %>%  
+  mutate(gem_char = paste0(RS_Land, RS_RB, RS_Kreis, RS_Gem)) %>% 
   ungroup()
 
-livestock_fixed <- livestock |> 
-  select(-gem_name) |>
-  left_join(commies |> 
+## merge livestock and regions
+livestock_fixed <- livestock %>%  
+  select(-gem_name) %>% 
+  left_join(commies %>% 
               select(gem_char, gem_name), 
             by = "gem_char")
    
 
+## check that the projection is the correct one
+livestock_fixed <- livestock_fixed %>% 
+  st_transform(3035)
 
 leaflet::leaflet(livestock_fixed %>% 
-                   st_transform(4326)) %>% 
+                   st_transform(crs = 4326)) %>% 
   leaflet::addPolygons() %>% 
   leaflet::addTiles()
 
-st_write(livestock_fixed, here( "output", "geo_proc", "livestock_de_2020_vector_4326.gpkg"))
-
-livestock_fixed <- st_read(here( "output", "geo_proc", "livestock_de_2020_vector_4326.gpkg"))
+# st_write(livestock_fixed, paste0(geoproc_wd, "/livestock_germany_2020_vector_3035.gpkg"))
+# livestock_fixed <- st_read(paste0(geoproc_wd, "/livestock_germany_2020_vector_3035.gpkg"))
 
 
 livestock_fixed %>% 
@@ -477,47 +452,65 @@ livestock_fixed %>%
 
 livestock %>% 
   filter(gem_name == "Berlin")
-
-```
-
-# thuenen crop data
-
-```{r}
-crops <- st_read(here("data_raw", "geo_raw","thuenen_livestock",
-                          "Gemeinde_Pflanzen_LEVL_2020_EXT_MWM_01_2023-09-18_10-04-11.shp"))
 ```
 
 
+############################################
+# Environmental layers at 100 m resolution #
+############################################
+
+## aggregate rasters
+
+We make the rasters 100 m resolution to diectly extract the environmental values at this resolution for the mice trapping points in the next step
 
 
+```{r imperv}
+imp_ger_c
+## make the NA zeros
+NAflag(imp_ger_c) <- 255
+
+imp_100m <- terra::aggregate(imp_ger_c, fact = 10, fun = "mean", na.rm = TRUE)
+plot(imp_100m)
+names(imp_100m) <- "imperv"
+imp_100m
+
+writeRaster(imp_100m, paste0(geoproc_wd, "/imperviousness_2018_100m_3035.tif"), overwrite = TRUE)
+```
 
 
-# Environmental layers at 100 m resolution
+```{r tcd}
+tcd_ger_c
+NAflag(tcd_ger_c) <- 255
 
-## CLC raster 100 m
-```{r}
-## load european data
-clc_100m <- rast("data_raw/geo_raw/clc_2018/U2018_CLC2018_V2020_20u1.tif")
+tcd_100m <- terra::aggregate(tcd_ger_c, fact = 10, fun = "mean", na.rm = TRUE)
+plot(tcd_100m)
+names(tcd_100m) <- "tcd"
+
+writeRaster(tcd_100m, paste0(geoproc_wd, "/tcd_2018_100m_3035.tif"), overwrite = TRUE)
+```
+
+
+```{r tcd}
+corine_2018_ras_c
+
+clc_100m <- aggregate(corine_2018_ras_c, fact = 10, fun = "modal", na.rm = TRUE)
 plot(clc_100m)
-
-clc_3035 <- project(clc_100m, "EPSG:3035")
-
-## crop to germany
-clc_germany <- crop(clc_3035, german_border)
-
-plot(clc_germany)
 plot(german_border, add = TRUE, col = "transparent", border = "red", lwd = 4)
+names(clc_100m) <- "clc"
 
-# writeRaster(clc_germany, paste0(geoproc_wd, "/clc_2018_germany_100m_3035.tif"))
+writeRaster(clc_100m, paste0(geoproc_wd, "/clc_2018_germany_100m_3035.tif"))
 ```
 
 
 ## swf raster 100 m
-Copernicus: small wood features
+Copernicus: small wood features, provided as categorical raster at 100m res for 2018
 ```{r}
+
 ## load european data
-swf_100m <- rast("data_raw/geo_raw/swf_2018/SWF_2018_100m_eu_03035.tif")
+swf_100m <- rast("./data/geo_raw/swf_2018/SWF_2018_100m_eu_03035.tif")
 plot(swf_100m)
+
+swf_100m <- project(swf_100m, st_crs(german_border)$wkt)
 
 ## crop to germany
 swf_germany <- crop(swf_100m, german_border)
@@ -525,62 +518,29 @@ swf_germany <- crop(swf_100m, german_border)
 plot(swf_germany)
 plot(german_border, add = TRUE, col = "transparent", border = "red", lwd = 4)
 
-values(swf_germany)
-
-plot(swf_germany)
-
 ## to make numerical
-values(swf_germany)
-levels(swf_germany)
-activeCat(swf_germany) <- "Value"
+rast_df <- cats(swf_germany) %>% 
+  as.data.frame() %>% 
+  mutate(swf_perc = Value)
 
-test <- rast(swf_germany$Value)
+swf_tmp <- categories(swf_germany, 
+                          layer = 1, 
+                          value = rast_df, 
+                          active = 4) # column 4 (do not count the value column! It has to be numeric)
 
-values(test) <- values(swf_germany)
-plot(test)
+swf_num_tmp <- catalyze(swf_tmp, index = 4) # column 3 for new_value
 
+# we select only the correct numerical column for the new raster
+swf_num <- swf_num_tmp$swf_perc
+NAflag(swf_num) <- 255
 
-# writeRaster(test, paste0(geoproc_wd, "/swf_2018_germany_100m_3035.tif"),
-#              overwrite = TRUE)
-# swf_germany <- rast(paste0(geoproc_wd, "/swf_2018_germany_100m_3035.tif"))
+swf_num <- mask(swf_num, vect(german_border))
+plot(swf_num)
 
-# plot(swf_germany)
+# writeRaster(swf_num, paste0(geoproc_wd, "/swf_2018_germany_100m_3035.tif"), overwrite = TRUE)
+# swf_num <- rast(paste0(geoproc_wd, "/swf_2018_germany_100m_3035.tif"))
 ```
 
-## imperviousness 2018 100m
-
-```{r}
-imp_10m <- rast(paste0(geoproc_wd, "/imperviousness_2018_10m_3035.tif"))
-plot(imp_10m)
-
-## make the NA zeros
-NAflag(imp_10m) <- 255
-
-imp_100m <- terra::aggregate(imp_10m, fact = 10, fun = "mean", na.rm = TRUE)
-plot(imp_100m)
-names(imp_100m) <- "imperv"
-imp_100m
-
- # writeRaster(imp_100m, paste0(geoproc_wd, "/imperviousness_2018_100m_3035.tif"), overwrite = TRUE)
-```
-
-
-## tree cover density 2018 100m
-
-```{r}
-tcd_10m <- rast(paste0(geoproc_wd, "/tree_cover_density_2018_10m_3035.tif"))
-
-## make the NA zeros
-NAflag(tcd_10m) <- 255
-plot(tcd_10m)
-
-tcd_100m <- terra::aggregate(tcd_10m, fact = 10, fun = "mean", na.rm = TRUE)
-names(tcd_100m) <- "tcd"
-tcd_100m
-plot(tcd_100m)
-
-# writeRaster(tcd_100m, paste0(geoproc_wd, "/tcd_2018_100m_3035.tif"), overwrite = TRUE)
-```
 
 ## distance to roads paths 100m
 
