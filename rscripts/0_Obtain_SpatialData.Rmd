@@ -138,6 +138,7 @@ Digitales Basis-Landschaftsmodell (Ebenen) (Basis-DLM)
 **This source costs money and it is not publicly available**
 PROBLEMS WITH PUBLICATIONS?? -- CHECK FOR OPEN ACCESS SOURCES!!
 
+I use XXXX in the name of the file instead of the year, as it is unknown for the moment.
 
 ```{r}
 road_list <- lapply(list.files(
@@ -158,7 +159,8 @@ road_dist_m <- mask(road_dist, german_border)
 plot(road_dist_m)
 
 # not: In the south-east are no roads. 
-writeRaster(road_dist_m, paste0(geoproc_wd, "/distance_to_roads_germany_2018_10m_3035.tif"), overwrite = TRUE)
+# writeRaster(road_dist_m, paste0(geoproc_wd, "/distance_to_roads_germany_XXXX_10m_3035.tif"), overwrite = TRUE)
+# road_dist_m <- rast(paste0(geoproc_wd, "/distance_to_roads_germany_XXXX_10m_3035.tif"))
 ```
 
 
