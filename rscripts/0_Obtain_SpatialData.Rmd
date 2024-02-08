@@ -199,7 +199,7 @@ plot(path_dist_m)
 
 
 
-# dwd https://opendata.dwd.de
+# Precipitation: dwd https://opendata.dwd.de
 
 Resolution: 1 km, crs = 31467
 
@@ -463,6 +463,7 @@ livestock %>%
 
 We make the rasters 100 m resolution to diectly extract the environmental values at this resolution for the mice trapping points in the next step
 
+## imperviousness
 
 ```{r imperv}
 imp_ger_c
@@ -477,6 +478,7 @@ imp_100m
 writeRaster(imp_100m, paste0(geoproc_wd, "/imperviousness_2018_100m_3035.tif"), overwrite = TRUE)
 ```
 
+## tree cover density
 
 ```{r tcd}
 tcd_ger_c
@@ -489,8 +491,9 @@ names(tcd_100m) <- "tcd"
 writeRaster(tcd_100m, paste0(geoproc_wd, "/tcd_2018_100m_3035.tif"), overwrite = TRUE)
 ```
 
+## corine land cover
 
-```{r tcd}
+```{r clc}
 corine_2018_ras_c
 
 clc_100m <- aggregate(corine_2018_ras_c, fact = 10, fun = "modal", na.rm = TRUE)
@@ -501,19 +504,18 @@ names(clc_100m) <- "clc"
 writeRaster(clc_100m, paste0(geoproc_wd, "/clc_2018_germany_100m_3035.tif"))
 ```
 
-
 ## swf raster 100 m
 Copernicus: small wood features, provided as categorical raster at 100m res for 2018
 ```{r}
 
 ## load european data
-swf_100m <- rast("./data/geo_raw/swf_2018/SWF_2018_100m_eu_03035.tif")
+swf_100m_tmp <- rast("./data/geo_raw/swf_2018/SWF_2018_100m_eu_03035.tif")
 plot(swf_100m)
 
-swf_100m <- project(swf_100m, st_crs(german_border)$wkt)
+swf_100m_tmp <- project(swf_100m, st_crs(german_border)$wkt)
 
 ## crop to germany
-swf_germany <- crop(swf_100m, german_border)
+swf_germany <- crop(swf_100m_tmp, german_border)
 
 plot(swf_germany)
 plot(german_border, add = TRUE, col = "transparent", border = "red", lwd = 4)
@@ -534,93 +536,112 @@ swf_num_tmp <- catalyze(swf_tmp, index = 4) # column 3 for new_value
 swf_num <- swf_num_tmp$swf_perc
 NAflag(swf_num) <- 255
 
-swf_num <- mask(swf_num, vect(german_border))
-plot(swf_num)
+## resample to imperv raster to make them stack
+swf_100m <- terra::resample(swf_num, imp_100m)
+NAflag(swf_100) <- 255
 
-# writeRaster(swf_num, paste0(geoproc_wd, "/swf_2018_germany_100m_3035.tif"), overwrite = TRUE)
-# swf_num <- rast(paste0(geoproc_wd, "/swf_2018_germany_100m_3035.tif"))
+swf_100m <- mask(swf_100m, vect(german_border))
+plot(swf_100)
+
+#  writeRaster(swf_100, paste0(geoproc_wd, "/swf_2018_germany_100m_3035.tif"), overwrite = TRUE)
+# swf_100 <- rast(paste0(geoproc_wd, "/swf_2018_germany_100m_3035.tif"))
 ```
 
 
 ## distance to roads paths 100m
 
 ```{r}
-road_rast <- rast(paste0(geoproc_wd, "/streets_germany_2018_10m_3035.tif"))
-road_dist_10m <- rast(paste0(geoproc_wd, "/distance_to_streets_germany_2018_10m_3035.tif"))
-plot(road_rast)
-plot(road_dist_10m)
-
-road_d_100m <- terra::aggregate(road_dist_10m, fact = 10, fun = "mean", na.rm = TRUE)
+road_d_100m <- terra::aggregate(road_dist_m, fact = 10, fun = "mean", na.rm = TRUE)
 road_d_100m
 names(road_d_100m) <- "dist_road"
 plot(road_d_100m)
 
-# writeRaster(road_d_100m, paste0(geoproc_wd, "/distance_roads_2018_100m_3035.tif"))
+writeRaster(road_d_100m, paste0(geoproc_wd, "/distance_roads_germany_2018_100m_3035.tif"))
 ```
 
 ## distance to paths 100m
 
 ```{r}
-path_rast <- rast(paste0(geoproc_wd, "/paths_germany_2018_10m_3035.tif"))
-path_dist_10m <- rast(paste0(geoproc_wd, "/distance_to_paths_germany_2018_10m_3035.tif"))
-
-plot(path_dist_10m)
-
-path_d_100m <- terra::aggregate(path_dist_10m, fact = 10, fun = "mean", na.rm = TRUE)
+path_d_100m <- terra::aggregate(path_dist_m, fact = 10, fun = "mean", na.rm = TRUE)
 path_d_100m
 names(path_d_100m) <- "dist_path"
 plot(path_d_100m)
 
-# writeRaster(path_d_100m, paste0(geoproc_wd, "/distance_to_paths_2018_100m_3035.tif"))
+writeRaster(path_d_100m, paste0(geoproc_wd, "/distance_to_paths_germany_2018_100m_3035.tif"))
+```
+
+
+## precipitation
+We create one for each year and resample it to 100m so it stacks with the other layers
+```{r}
+crs(prec_rasters)
+crs(imp_100m)
+
+prec_3035 <- project(prec_rasters, crs(imp_100m))
+
+prec_2015_100m <- resample(prec_3035$prec_aug_2015, imp_100m)
+prec_2016_100m <- resample(prec_3035$prec_aug_2016, imp_100m)
+prec_2017_100m <- resample(prec_3035$prec_aug_2017, imp_100m)
+prec_2018_100m <- resample(prec_3035$prec_aug_2018, imp_100m)
+
+plot(prec_2016_100m)
+
+```
+
+## soil moisture
+resampling to match extent and resolution of the other layers
+```{r}
+ras_moist
+moist_3035 <- project(ras_moist, crs(imp_100m))
+moist_100m <- resample(moist_3035, imp_100m)
+plot(moist_100m)
+```
+
+## soil ph
+resampling to match extent and resolution of the other layers
+```{r}
+soil_ph_3035
+
+soil_ph_100m <- resample(soil_ph_3035, imp_100m)
+plot(soil_ph_100m)
 ```
 
 ## rasterize livestock info
 ```{r}
-## load cattle info
-livestock_sf <- st_read(paste0(geoproc_wd, "/livestock_de_2020_vector_4326.gpkg")) %>% 
-  st_transform(3035)
-livestock_sf
-
 ## get areas
-livestock_sf$area <- st_area(livestock_sf) %>% 
-  set_units(km^2)
+livestock_fixed$area_km <- st_area(livestock_fixed) %>% 
+  units::set_units(km^2)
 
-livestock_sf$area_ha <- set_units(livestock_sf$area, ha)
-livestock_sf
+livestock_fixed$area_ha <- units::set_units(livestock_fixed$area, ha)
+livestock_fixed
 
 ## Make spatvector
-livestock_vct <- vect(livestock_sf)
+livestock_vct <- vect(livestock_fixed)
 
 # raster template 100 m
-raster100 <- rast(swf_germany)
+raster100 <- rast(imp_100m)
 # create a smaller one to assign each cell the value of the polygon overlapping the center adn them merge to the max overlap
 n <- 10
 rast10 <- disagg(raster100, n)
-```
 
 
-```{r municipalities}
+## municipalities
 rast_mun <- rasterize(livestock_vct, rast10, field = "gem_char")
-plot(rast_mun)
-
 municipalities <- aggregate(rast_mun, n, "modal")
 plot(municipalities)
 
-# writeRaster(municipalities, paste0(geoproc_wd, "/municipalities_100m_3035.tif"))
+# writeRaster(municipalities, paste0(geoproc_wd, "/germany_municipalities_100m_3035.tif"))
 ```
 
 ```{r livestock raw numbers}
 ## Cattle
 rast_cattle <- rasterize(livestock_vct, rast10, field = "CATO")
-plot(rast_cattle)
-
 cattle <- aggregate(rast_cattle, n, "modal")
 plot(cattle)
 
 ## Pigs
 rast_pigs <- rasterize(livestock_vct, rast10, field = "PITO")
 pigs <- aggregate(rast_pigs, n, "modal")
-
 
 ### Poultry
 rast_poultry <- rasterize(livestock_vct, rast10, field = "POTO")
@@ -636,7 +657,7 @@ To get **densities**, we calculate the **livestock units / ha**.
 We do this because if we keep the original values (1000 livestock units), the numbers become really small. 
 ```{r livestock densities}
 ## make livestock a density by Km2 for cattle, pigs and poultry
-livestock_dens <- livestock_sf %>% 
+livestock_fixed <- livestock_fixed %>% 
   mutate(cat_dens = CATO / as.numeric(area_ha) * 1000, ## we multiply for the value of the GVE (1000 GVE , 500kg cow) to avoid very low values
          pig_dens = PITO / as.numeric(area_ha) * 1000, ## we multiply for the value of the GVE (1000 GVE , 500kg cow) to avoid very low values
          pou_dens = POTO / as.numeric(area_ha) * 1000000) %>%  ## we multiply for the value of the GVE (1000000 GVE , 500kg cow) to avoid very low values
@@ -645,26 +666,45 @@ livestock_dens <- livestock_sf %>%
 livestock_dens
 # The value here represents the livestock units / ha
   
-dens_vtr <- vect(livestock_dens)
+livestock_vct <- vect(livestock_fixed)
 
 ## Cattle density
-rast_catdens <- rasterize(livestock_dens, rast10, field = "cat_dens")
-plot(rast_catdens)
-
-catdens <- aggregate(rast_catdens, n, "mean")
+rast_catdens <- rasterize(livestock_vct, rast10, field = "cat_dens")
+ext(rast_catdens)
+catdens <- aggregate(rast_catdens, n, fun = "mean", na.rm = TRUE)
+ext(catdens)
 plot(catdens)
 
 ## Pigs
-rast_pigdens <- rasterize(livestock_dens, rast10, field = "pig_dens")
+rast_pigdens <- rasterize(livestock_vct, rast10, field = "pig_dens")
 pigdens <- aggregate(rast_pigdens, n, "mean")
-plot(pigdens)
 
 ### Poultry
-rast_poudens <- rasterize(livestock_dens, rast10, field = "pou_dens")
+rast_poudens <- rasterize(livestock_vct, rast10, field = "pou_dens")
 poudens <- aggregate(rast_poudens, n, "mean")
-plot(poudens)
 
-writeRaster(catdens, paste0(geoproc_wd, "/cattle_GVE_densityha_germany_2020_100m_3035.tif"))
-writeRaster(pigdens, paste0(geoproc_wd, "/pigs_GVE_densityha_germany_2020_100m_3035.tif"))
-writeRaster(poudens, paste0(geoproc_wd, "/poultry_GVE_densityha_germany_2020_100m_3035.tif"))
+writeRaster(catdens, paste0(geoproc_wd, "/cattle_GVE_densityha_germany_2020_100m_3035.tif"), overwrite=TRUE)
+writeRaster(pigdens, paste0(geoproc_wd, "/pigs_GVE_densityha_germany_2020_100m_3035.tif"), overwrite=TRUE)
+writeRaster(poudens, paste0(geoproc_wd, "/poultry_GVE_densityha_germany_2020_100m_3035.tif"), overwrite=TRUE)
 ```
+
+## Put all environmental layers together
+```{r}
+env_cov_100m <- c(imp_100m, tcd_100m, clc_100m, swf_100m, 
+                  road_d_100m, path_d_100m, 
+                  prec_2015_100m, prec_2016_100m, prec_2017_100m, prec_2018_100m,
+                  moist_100m, soil_ph_100m,
+                  cattle, pigs, poultry, catdens, pigdens, poudens)
+env_cov_100m
+
+my_envrasters <- data.frame(names = names(env_cov_100m))
+
+writeRaster(env_cov_100m, paste0(geoproc_wd, "/stack_env_covariates_100m_3035.tif"))
+write.csv(my_envrasters, paste0(geoproc_wd, "/stack_env_covariates_100m_3035_names.csv"), row.names = FALSE)
+
+ext(imp_100m)
+ext(tcd_100m)
+ext(clc_100m)
+ext(swf_100m)
+```
+
