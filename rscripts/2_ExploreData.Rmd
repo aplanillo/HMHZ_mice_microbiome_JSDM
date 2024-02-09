@@ -1,0 +1,170 @@
+---
+title: "ExploreData"
+author: "Aimara Planillo"
+date: "2024-02-09"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Explore Data
+
+This script contains the preliminary analyses to select variables and clean data for the JSDMs.
+
+
+```{r prepare workspace}
+source("rscripts/source_pkgs.R")
+
+wrkdir <- getwd()
+output_wd <- paste0(wrkdir, "/output/data_exploration")
+```
+
+
+# Test correlations in explanatory variables
+
+
+## load mice data
+```{r}
+mice_data <- read.csv("./intermediate_data/Table_mice_envcov_100m.csv")
+```
+
+## correlations numerical variables
+
+```{r variable correlation}
+## get correlations
+correlations_table <- mice_data %>% 
+  dplyr::select(where("is.numeric")) %>% 
+  dplyr::select(-ID, -gem_char, -jS_lon, -jS_lat)
+
+head(correlations_table)
+
+cor_mice <- cor(correlations_table, use = "pairwise.complete.obs")
+
+
+## plot all correlations
+RColorBrewer::brewer.pal(n = 8, name = "RdBu")
+
+mycorplot <- ggcorrplot::ggcorrplot(cor_mice, 
+                       type = "lower", 
+                       outline.color = "white",
+                       lab = TRUE,
+                       ggtheme = ggplot2::theme_minimal,
+                       # ggtheme = ggplot2::theme(axis.line = element_line(col = "black")),
+                       # colors = c("#6D9EC1", "white", "#E46726")) +
+                       colors = c("#B2182B", "white", "#2166AC")) +
+  theme(axis.line = element_line(colour = "black"), 
+        plot.background = element_rect(colour = "transparent", fill = "white"))
+  
+
+ggsave(plot = mycorplot, 
+       filename = "./plots/mice_envcov_correlations.png", 
+       dpi = 600, width = 20, height = 20)
+
+
+## plot only correlations above |0.6|
+
+cor_mice %>% 
+  as.data.frame() %>% 
+  filter(across(all(.fns = ~. > 0.6)))
+
+highcors <- cor_mice %>% 
+  as.data.frame() %>% 
+  ## filter the rows with values greater or lower than |0.6|
+  filter(rowSums(across(where(is.numeric)) > 0.6) > 1 | rowSums(across(where(is.numeric)) < -0.6) > 1) %>% 
+  # keep all columns with any value less or greater than |0.6|
+  purrr::keep(~ any(. < -0.6 | . > 0.6))
+
+
+reduced_corplot <- ggcorrplot::ggcorrplot(highcors, 
+                       type = "lower", 
+                       outline.color = "white",
+                       lab = TRUE,
+                       ggtheme = ggplot2::theme_minimal,
+                       # ggtheme = ggplot2::theme(axis.line = element_line(col = "black")),
+                       # colors = c("#6D9EC1", "white", "#E46726")) +
+                       colors = c("#B2182B", "white", "#2166AC")) +
+  theme(axis.line = element_line(colour = "black"), 
+        plot.background = element_rect(colour = "transparent", fill = "white"))
+  
+
+ggsave(plot = reduced_corplot, 
+       filename = "./plots/mice_envcov_correlations_reduced.png", 
+       dpi = 600, width = 8, height = 8)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Explore values
+```{r explore values}
+
+cov_mice_long <- cov_mice %>% 
+  pivot_longer(cols = !c(ID, clc2018, gem_char), 
+               names_to = "variable")
+
+head(cov_mice_long, 20)
+
+## all numerical values
+ggplot(cov_mice_long, aes(x = variable, y = value)) +
+  geom_boxplot()
+
+## distances
+(plotdist <- cov_mice_long %>%
+    filter(variable %in% c("dist_path", "dist_road")) %>%
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#CC99CC", "#996699")) +
+    xlab("") +
+    ylab("Distance (m)") +
+    theme_ap())
+
+
+## covers
+(plotcover <- cov_mice_long %>%
+    filter(variable %in% c("tcd", "swf", "imperv")) %>%
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#999999", "#669900",  "#336600")) +
+    xlab("") +
+    ylab("Cover (%)") +
+    theme_ap())
+
+## livestock density
+(plotlivestock <- cov_mice_long %>% 
+  filter(variable %in% c("cat_dens", "pig_dens", "pou_dens")) %>% 
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#993300", "#CC6600",  "#FFCC99")) +
+    xlab("") +
+    ylab("Livestock units / ha") +
+    ylim(0, 10) +
+    theme_ap())
+
+
+allplots <- ggarrange(plotdist, plotcover, plotlivestock, 
+          labels = c("a", "b", "c"),
+          ncol = 2, nrow = 2)
+
+ggsave(plot = allplots, 
+       filename = "./plots/mice_envcov_rawvalues.png", 
+       dpi = 600, width = 12, height = 10)
+
+```
+
+
+
