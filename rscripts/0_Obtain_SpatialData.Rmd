@@ -401,7 +401,7 @@ livestock <- st_read("./data/geo_raw/thuenen_livestock/Gemeinde_Tiere_LU_2020_EX
 ## Merge with regional data (obtained from Destatis) 
 
 ## load regional data
-commies <- readxl::read_xlsx("./data/geo_raw/thuenen_livestock/31122010_Auszug_GV.xlsx",
+munip <- readxl::read_xlsx("./data/geo_raw/thuenen_livestock/31122010_Auszug_GV.xlsx",
                              sheet = 2,
                              skip = 5,
                              col_names = c("Satzart",
@@ -429,7 +429,7 @@ commies <- readxl::read_xlsx("./data/geo_raw/thuenen_livestock/31122010_Auszug_G
 ## merge livestock and regions
 livestock_fixed <- livestock %>%  
   select(-gem_name) %>% 
-  left_join(commies %>% 
+  left_join(munip %>% 
               select(gem_char, gem_name), 
             by = "gem_char")
    
@@ -693,14 +693,15 @@ writeRaster(poudens, paste0(geoproc_wd, "/poultry_GVE_densityha_germany_2020_100
 env_cov_100m <- c(imp_100m, tcd_100m, clc_100m, swf_100m, 
                   road_d_100m, path_d_100m, 
                   prec_2015_100m, prec_2016_100m, prec_2017_100m, prec_2018_100m,
-                  moist_100m, soil_ph_100m,
-                  cattle, pigs, poultry, catdens, pigdens, poudens)
+                  moist_100m, soil_ph_100m, 
+                  cattle, pigs, poultry, catdens, pigdens, poudens, 
+                  municipalities)
 env_cov_100m
 
 my_envrasters <- data.frame(names = names(env_cov_100m))
 
-writeRaster(env_cov_100m, paste0(geoproc_wd, "/stack_env_covariates_100m_3035.tif"))
-write.csv(my_envrasters, paste0(geoproc_wd, "/stack_env_covariates_100m_3035_names.csv"), row.names = FALSE)
+writeRaster(env_cov_100m, paste0(geoproc_wd, "/stack_env_covariates_germany_100m_3035.tif"), overwrite = TRUE)
+write.csv(my_envrasters, paste0(geoproc_wd, "/stack_env_covariates_germany_100m_3035_names.csv"), row.names = FALSE)
 
 ext(imp_100m)
 ext(tcd_100m)
