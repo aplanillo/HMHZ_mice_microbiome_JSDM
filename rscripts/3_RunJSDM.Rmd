@@ -1,0 +1,43 @@
+---
+title: "jSDM"
+author: "Aimara Planillo"
+date: "2024-02-12"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# jSDM for mice microbiome    
+
+We use 
+* Response: the bacterial microbiome in the mice as response.
+* Explanatory variables: environmental variables and mouse characteristics
+* Spatial effects: longitude and latitude
+* Random: year
+
+
+### prepare workspace
+```{r}
+source("rscripts/source_pkgs.R") # r libraries
+
+wrkdir <- getwd()
+output_wd <- paste0(wrkdir, "/output/jSDM_20240212")
+```
+
+### load data
+```{r}
+# mice related data
+mice_data <- read.csv("./intermediate_data/Table_mice_envcov_100m.csv")
+
+# microbiome bacteria data
+PS.TSS_filtered_jS <- readRDS("./intermediate_data/PSvar.rds")
+PS.TSS_filtered_jS
+
+micro_bacteria <- subset_taxa(PS.TSS_filtered_jS, Kingdom %in%"Bacteria")
+
+```
+
