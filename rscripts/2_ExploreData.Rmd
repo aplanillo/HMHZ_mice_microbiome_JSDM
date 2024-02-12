@@ -17,7 +17,8 @@ This script contains the preliminary analyses to select variables and clean data
 
 
 ```{r prepare workspace}
-source("rscripts/source_pkgs.R")
+source("rscripts/source_pkgs.R") # r libraries
+source("rscripts/source_themes.R") # ggplot2 themes
 
 wrkdir <- getwd()
 output_wd <- paste0(wrkdir, "/output/data_exploration")
@@ -98,30 +99,20 @@ ggsave(plot = reduced_corplot,
 ```
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 Explore values
 ```{r explore values}
-
-cov_mice_long <- cov_mice %>% 
-  pivot_longer(cols = !c(ID, clc2018, gem_char), 
+head(mice_data)
+cov_mice_long <- mice_data %>% 
+  pivot_longer(cols = !c(jS_mouseID, jS_sex, ID, clc, gem_char, jS_year), 
                names_to = "variable")
 
 head(cov_mice_long, 20)
 
+unique(cov_mice_long$variable)
 ## all numerical values
 ggplot(cov_mice_long, aes(x = variable, y = value)) +
   geom_boxplot()
+
 
 ## distances
 (plotdist <- cov_mice_long %>%
@@ -131,18 +122,55 @@ ggplot(cov_mice_long, aes(x = variable, y = value)) +
     scale_fill_manual(values = c("#CC99CC", "#996699")) +
     xlab("") +
     ylab("Distance (m)") +
-    theme_ap())
+    theme_ap() +
+    theme(
+      axis.text.x = element_text(angle = 90)
+    ))
 
 
 ## covers
 (plotcover <- cov_mice_long %>%
-    filter(variable %in% c("tcd", "swf", "imperv")) %>%
+    filter(variable %in% c("tcd", "swf_perc", "imperv")) %>%
     ggplot(aes(x = variable, y = value, fill = variable)) +
     geom_boxplot(show.legend = FALSE, alpha = 0.7) +
     scale_fill_manual(values = c("#999999", "#669900",  "#336600")) +
     xlab("") +
     ylab("Cover (%)") +
     theme_ap())
+
+## soil ph
+(plotsoilph <- cov_mice_long %>%
+    filter(variable %in% c("soil_ph")) %>%
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#FF4040")) +
+    xlab("") +
+    ylab("Soil ph") +
+    theme_ap() )
+
+## soil moisture
+(plotsoilmoist <- cov_mice_long %>%
+    filter(variable %in% c("soil_moist")) %>%
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#FF7F24")) +
+    xlab("") +
+    ylab("Soil % moisture") +
+    theme_ap() )
+
+
+## precipation
+(plotprec <- cov_mice_long %>% 
+  filter(variable %in% c("prec_aug_2015", "prec_aug_2016", "prec_aug_2017", "prec_aug_2018")) %>% 
+    ggplot(aes(x = variable, y = value, fill = variable)) +
+    geom_boxplot(show.legend = FALSE, alpha = 0.7) +
+    scale_fill_manual(values = c("#98F5FF", "#8EE5EE",  "#7AC5CD", "#53868B")) +
+    xlab("") +
+    ylab("Precipation") +
+    # ylim(0, 10) +
+    theme_ap() +
+     theme(
+      axis.text.x = element_text(angle = 90)))
 
 ## livestock density
 (plotlivestock <- cov_mice_long %>% 
@@ -156,13 +184,17 @@ ggplot(cov_mice_long, aes(x = variable, y = value)) +
     theme_ap())
 
 
-allplots <- ggarrange(plotdist, plotcover, plotlivestock, 
-          labels = c("a", "b", "c"),
-          ncol = 2, nrow = 2)
+
+
+
+allplots <- ggarrange(plotdist, plotcover, plotsoilph, plotsoilmoist, plotprec, plotlivestock, 
+          labels = "auto",
+          ncol = 3, nrow = 2, 
+          align = "h")
 
 ggsave(plot = allplots, 
-       filename = "./plots/mice_envcov_rawvalues.png", 
-       dpi = 600, width = 12, height = 10)
+       filename = "./plots/mice_envcov_rawvalues_ranges.png", 
+       dpi = 600, width = 14, height = 10)
 
 ```
 
