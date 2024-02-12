@@ -38,6 +38,5 @@ PS.TSS_filtered_jS <- readRDS("./intermediate_data/PSvar.rds")
 PS.TSS_filtered_jS
 
 micro_bacteria <- subset_taxa(PS.TSS_filtered_jS, Kingdom %in%"Bacteria")
-
 ```
 
