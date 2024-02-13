@@ -38,6 +38,9 @@ PS.TSS_filtered <- readRDS("./data/PS.TSS_filtered.rds")
 aggregateDensity <- unclass(sample_data(PS.TSS_filtered)) %>%
     ## need to remove class "sample_data" (phyloseq)
     as_tibble() %>%
+    ## need to remove NA the same data 
+    filter(!is.na(Body_Length)) %>% 
+    ## add total mice trapped per locality and year  
     group_by(Locality, Year) %>%
     ## Number of mice trapped at one locality (combined long/lat at
     ## 4-digit resolution, available in "Locality"). We processed all
@@ -48,7 +51,7 @@ aggregateDensity <- unclass(sample_data(PS.TSS_filtered)) %>%
     ## enriched. Potential alternatives not considered now:
     ## collapsing localities at larger scale (more rounding),
     ## persistent density over years for those)
-    summarize(jS_Ntrapped = n())
+    summarize(jS_Ntrapped = n())  
 
 ## filter NAs and select variables
 allSData <- unclass(sample_data(PS.TSS_filtered)) %>%
@@ -97,6 +100,13 @@ head(allSData)
 ```{r}
 PS.TSS_filtered_jS <- subset_samples(PS.TSS_filtered, !is.na(Body_Length))
 PS.TSS_filtered_jS@sam_data <- sample_data(allSData)
+
+## check phyloseq object is correct
+sample_names(PS.TSS_filtered_jS@otu_table)
+sample_names(PS.TSS_filtered_jS@sam_data)
+
+## make sure the sample names are the same for the sample_data and otu_table. We use the jS_mouseID column
+sample_names(PS.TSS_filtered_jS@sam_data)<- PS.TSS_filtered_jS@sam_data$jS_mouseID
 
 saveRDS(PS.TSS_filtered_jS, "./intermediate_data/PSvar.rds")
 # PS.TSS_filtered_jS <- readRDS("./intermediate_data/PSvar.rds")
