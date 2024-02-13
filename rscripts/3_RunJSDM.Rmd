@@ -37,6 +37,97 @@ mice_data <- read.csv("./intermediate_data/Table_mice_envcov_100m.csv")
 PS.TSS_filtered_jS <- readRDS("./intermediate_data/PSvar.rds")
 PS.TSS_filtered_jS
 
-micro_bacteria <- subset_taxa(PS.TSS_filtered_jS, Kingdom %in%"Bacteria")
+## filter data for bacteria
+PS_bacteria <- subset_taxa(PS.TSS_filtered_jS, Kingdom %in%"Bacteria")
+
+PS_bacteria@otu_table
+
+## get data at family level
+rank_names(PS_bacteria)[5]
+PS_bacteria_fam <- tax_glom(PS_bacteria, taxrank=rank_names(PS_bacteria)[5])
+PS_bacteria_fam
+
+## 60 bacteria Families in 607 mice
+```
+
+
+## extract bacteria presence / absence data for each mouse
+```{r}
+## cahnge the row names of tax table and col names of otu tables for new ones so they are easier to merge
+rownames(PS_bacteria_fam@tax_table) <- paste0("ASV", 1:nrow(PS_bacteria_fam@tax_table))
+colnames(PS_bacteria_fam@otu_table) <- paste0("ASV", 1:ncol(PS_bacteria_fam@otu_table))
+
+PS_bacteria_fam@otu_table
+
+
+PS_bacteria_fam <- tax_glom(PS_bacteria, taxrank=rank_names(PS_bacteria)[5])
+
+
+
+
+
+
+
+
+
+
+micro_bacteria <- subset_taxa(PS.TSS_filtered_jS, Kingdom %in%"Bacteria", taxa_are_rows = FALSE)
+
+sample_names(PS.TSS_filtered_jS)
+
+PS.TSS_filtered_jS@tax_table[,1]
+colnames(PS.TSS_filtered_jS@tax_table)
+rownames(PS.TSS_filtered_jS@tax_table)
+
+colnames(PS.TSS_filtered_jS@otu_table)
+rownames(PS.TSS_filtered_jS@otu_table)
+
+
+
+micro_bacteria <- subset_taxa(PS.TSS_filtered, Kingdom %in%"Bacteria")
+
+
+otust <- as.matrix(PS.TSS_filtered_jS@otu_table)
+taxt <- as.matrix(PS.TSS_filtered_jS@tax_table)
+sampt <- data.frame(PS.TSS_filtered_jS@sam_data)
+
+tail(sampt)
+sampt <- sampt[!is.na(sampt$jS_mouseID),]
+
+taxt<-tax_table(taxt)
+
+otust<- otu_table(otust, taxa_are_rows = F)
+sample_names(otust)
+
+sampt<- sample_data(sampt)
+sample_names(sampt)
+sample_names(sampt)<- sampt$jS_mouseID
+
+
+PS.NEW <- merge_phyloseq(otust, taxt, sampt)
+
+PS_bacteria <- subset_taxa(PS.NEW, Kingdom %in%"Bacteria")
+
+PS_bacteria@otu_table
+
+colnames(PS_bacteria@tax_table)
+rownames(PS_bacteria@tax_table)
+
+PS_bacteria@tax_table
+
+
+
+rownames(PS_bacteria@tax_table) <- paste0("ASV", 1:nrow(PS_bacteria@tax_table))
+colnames(PS_bacteria@otu_table) <- paste0("ASV", 1:ncol(PS_bacteria@otu_table))
+
+rank_names(PS_bacteria)
+
+PS_bacteria_fam <- tax_glom(PS_bacteria, taxrank=rank_names(PS_bacteria)[5])
+
+
+
+## Family
+
+
 ```
 
