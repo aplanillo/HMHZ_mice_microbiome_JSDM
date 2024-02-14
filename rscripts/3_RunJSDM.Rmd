@@ -172,9 +172,8 @@ studyDesign <- data.frame(sample = as.factor(all_data$jS_mouseID), locality = as
                           year = as.factor(all_data$jS_year))
 
 
-rL3 <- HmscRandomLevel(units = levels(all_data$jS_year)) # account for temporal correlation
-rL2 <- HmscRandomLevel(sData = xyData, units = levels(all_data$locID)) # accounts for nested sampling
-rL1 <- HmscRandomLevel(units = levels(all_data$jS_mouseID)) # obtain residual correlations
+rL2 <- HmscRandomLevel(units = levels(all_data$jS_year)) # account for temporal correlation
+rL1 <- HmscRandomLevel(sData = xyData, units = levels(all_data$locID)) # accounts for nested sampling and spatial locations
 
 ```
 
@@ -203,7 +202,7 @@ XFormula_OTU = ~ jS_sex + jS_BMI + jS_HI + jS_Ntrapped + imperv + tcd + swf_perc
 
 ```{r}
 m <- Hmsc(Y = response_pa, XData = explanatory_var, XFormula = XFormula_OTU,
-           studyDesign=studyDesign, ranLevels=list("sample" = rL3,"locality"= rL2, "year" = rL3),
+           studyDesign=studyDesign, ranLevels=list("locality"= rL1, "year" = rL2),
           distr = "probit")
 ```
 
