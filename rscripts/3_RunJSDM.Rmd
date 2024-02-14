@@ -75,7 +75,7 @@ otut_pa[otut_pa > 0] <- 1
  
 head(otut_pa)
 
-otut_pa <- otut_pa %>% 
+otut_pa <- otut_pa %>%
   tibble::rownames_to_column("mouseID")
 
 ```
@@ -172,9 +172,9 @@ studyDesign <- data.frame(sample = as.factor(all_data$jS_mouseID), locality = as
                           year = as.factor(all_data$jS_year))
 
 
-rL1 <- HmscRandomLevel(units = levels(all_data$jS_year))
-rL2 <- HmscRandomLevel(sData = xyData, units = levels(all_data$locID))
-rL3 <- HmscRandomLevel(units = levels(all_data$jS_mouseID))
+rL3 <- HmscRandomLevel(units = levels(all_data$jS_year)) # account for temporal correlation
+rL2 <- HmscRandomLevel(sData = xyData, units = levels(all_data$locID)) # accounts for nested sampling
+rL1 <- HmscRandomLevel(units = levels(all_data$jS_mouseID)) # obtain residual correlations
 
 ```
 
@@ -218,7 +218,7 @@ m <- sampleMcmc(m, thin = thin, samples = samples, transient = transient,
                 nChains = nChains, verbose = verbose, nParallel = nChains)
 
 
-model_wd <- paste0(getwd(), "/output/jSDM_20240212")
+model_wd <- paste0(getwd(), "/output/jSDM_bact_fam_pa_202402")
 # Set a name for the model
 filename <- paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214.rds")
 
