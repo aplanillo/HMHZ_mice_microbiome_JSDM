@@ -37,6 +37,7 @@ mice_data <- read.csv("./intermediate_data/Table_mice_envcov_100m.csv")
 PS.TSS_filtered_jS <- readRDS("./intermediate_data/PSvar.rds")
 PS.TSS_filtered_jS
 
+sample_data(PS.TSS_filtered_jS@sam_data)
 ## filter data for bacteria
 PS_bacteria <- subset_taxa(PS.TSS_filtered_jS, Kingdom %in%"Bacteria")
 
@@ -52,82 +53,175 @@ PS_bacteria_fam
 
 
 ## extract bacteria presence / absence data for each mouse
-```{r}
+```{r get table with pa data}
 ## cahnge the row names of tax table and col names of otu tables for new ones so they are easier to merge
 rownames(PS_bacteria_fam@tax_table) <- paste0("ASV", 1:nrow(PS_bacteria_fam@tax_table))
 colnames(PS_bacteria_fam@otu_table) <- paste0("ASV", 1:ncol(PS_bacteria_fam@otu_table))
 
 PS_bacteria_fam@otu_table
+PS_bacteria_fam@tax_table
 
+otut <- data.frame(PS_bacteria_fam@otu_table)
+taxt <- data.frame(PS_bacteria_fam@tax_table)
+taxt$Family
 
-PS_bacteria_fam <- tax_glom(PS_bacteria, taxrank=rank_names(PS_bacteria)[5])
+colnames(otut) <- taxt$Family
 
+head(otut)
 
+## make data presence / absence
+otut_pa <- otut
+otut_pa[otut_pa > 0] <- 1
+ 
+head(otut_pa)
 
-
-
-
-
-
-
-
-micro_bacteria <- subset_taxa(PS.TSS_filtered_jS, Kingdom %in%"Bacteria", taxa_are_rows = FALSE)
-
-sample_names(PS.TSS_filtered_jS)
-
-PS.TSS_filtered_jS@tax_table[,1]
-colnames(PS.TSS_filtered_jS@tax_table)
-rownames(PS.TSS_filtered_jS@tax_table)
-
-colnames(PS.TSS_filtered_jS@otu_table)
-rownames(PS.TSS_filtered_jS@otu_table)
-
-
-
-micro_bacteria <- subset_taxa(PS.TSS_filtered, Kingdom %in%"Bacteria")
-
-
-otust <- as.matrix(PS.TSS_filtered_jS@otu_table)
-taxt <- as.matrix(PS.TSS_filtered_jS@tax_table)
-sampt <- data.frame(PS.TSS_filtered_jS@sam_data)
-
-tail(sampt)
-sampt <- sampt[!is.na(sampt$jS_mouseID),]
-
-taxt<-tax_table(taxt)
-
-otust<- otu_table(otust, taxa_are_rows = F)
-sample_names(otust)
-
-sampt<- sample_data(sampt)
-sample_names(sampt)
-sample_names(sampt)<- sampt$jS_mouseID
-
-
-PS.NEW <- merge_phyloseq(otust, taxt, sampt)
-
-PS_bacteria <- subset_taxa(PS.NEW, Kingdom %in%"Bacteria")
-
-PS_bacteria@otu_table
-
-colnames(PS_bacteria@tax_table)
-rownames(PS_bacteria@tax_table)
-
-PS_bacteria@tax_table
-
-
-
-rownames(PS_bacteria@tax_table) <- paste0("ASV", 1:nrow(PS_bacteria@tax_table))
-colnames(PS_bacteria@otu_table) <- paste0("ASV", 1:ncol(PS_bacteria@otu_table))
-
-rank_names(PS_bacteria)
-
-PS_bacteria_fam <- tax_glom(PS_bacteria, taxrank=rank_names(PS_bacteria)[5])
-
-
-
-## Family
-
+otut_pa <- otut_pa %>% 
+  tibble::rownames_to_column("mouseID")
 
 ```
 
+
+```{r check duplicates}
+## to remove duplicates, we need to transpose the data, merge the rows with the same name and transpose again to the original format
+  
+sampleID <- rownames(otut_pa)
+taxaID <- colnames(otut_pa)
+
+length(unique(taxaID)) # 60 Fam
+length(unique(sampleID)) # 607 samples
+# No dup
+```
+
+## prepare final mice data
+Assign precipitation value to the year the mouse where captured
+```{r}
+head(mice_data)
+
+mice_data %>% 
+  group_by(jS_loc) %>% 
+  # mutate(numId = seq(1:length(unique(jS_loc)))) 
+  mutate(locID =  cur_group_id()) %>% 
+  dplyr::select(jS_mouseID, locID)
+ 
+ 
+## filter environmnetal variables and set pig density NA to 0
+mice_data2 <- mice_data %>% 
+  group_by(jS_loc) %>% 
+  mutate(numlocID =  cur_group_id()) %>% 
+  mutate(locID = paste0("loc_", numlocID)) %>% 
+  ungroup() %>% 
+  mutate(precipation_aug = case_when(
+    jS_year == 2015 ~ prec_aug_2015,
+    jS_year == 2016 ~ prec_aug_2016,
+    jS_year == 2017 ~ prec_aug_2017,
+    jS_year == 2018 ~ prec_aug_2018,
+    TRUE ~NA)) %>% 
+  mutate(jS_sex = as.factor(jS_sex), 
+         municipality_code = as.factor(as.character(gem_char)), 
+         clc_fct = as.factor(clc_fct)) %>% 
+  mutate(pig_dens = replace_na(pig_dens, 0)) %>% 
+  dplyr::select(-c(jS_loc, prec_aug_2015, prec_aug_2016, prec_aug_2017, prec_aug_2018, 
+                   ID, CATO, PITO, POTO, gem_char))
+mice_data2
+
+## add bacteria
+all_data <- mice_data2 %>% 
+  left_join(otut_pa, by = c("jS_mouseID" = "mouseID"))
+
+head(all_data)
+```
+
+
+# Run jSDM
+
+For the JSDM we need:
+- a matrix of species: sites in rows (mice) and species in columns (OTU)
+- a data frame with the environmental covariates for sites: sites (mice) in rows, same order as above
+- random structure
+- spatial structure
+
+## Set up variables and model structure
+
+```{r}
+colnames(all_data)
+
+# response matrix 
+my_response <- colnames(otut_pa)[-1] ## remove mouseID
+response_pa <- all_data %>% 
+  dplyr::select(all_of(my_response)) %>% 
+  as.matrix()
+
+# explanatory df
+my_cov <- c("jS_sex", "jS_BMI", "jS_HI", "jS_Ntrapped", "imperv", "tcd", 
+            "swf_perc", "dist_road", "dist_path", #"soil_moist", "soil_ph", 
+            "cat_dens", "pig_dens", "pou_dens", "clc_fct", "precipation_aug", "municipality_code")
+explanatory_var <- all_data %>% 
+  dplyr::select(all_of(my_cov)) 
+
+as.data.frame(explanatory_var[!complete.cases(explanatory_var),])
+
+## spatial data (wihtout duplicates)
+xyData <- all_data %>%
+  group_by(locID) %>% 
+  summarise(lon = unique(jS_lon), 
+            lat = unique(jS_lat)) %>% 
+  tibble::column_to_rownames("locID")
+
+## two nested random effects
+studyDesign <- data.frame(sample = as.factor(all_data$jS_mouseID), locality = as.factor(all_data$locID), 
+                          year = as.factor(all_data$jS_year))
+
+
+rL1 <- HmscRandomLevel(units = levels(all_data$jS_year))
+rL2 <- HmscRandomLevel(sData = xyData, units = levels(all_data$locID))
+rL3 <- HmscRandomLevel(units = levels(all_data$jS_mouseID))
+
+```
+
+
+### Define MCMC parameters
+```{r}
+thin <- 10
+samples <- 10000
+transient <- 1000
+nChains <- 3
+verbose <- 1000
+
+# Regression formula for environmental covariates
+
+## there are many NA in soil ph and soil moisture is correlated to precipitation, thus we remove those variables
+
+XFormula_OTU = ~ jS_sex + jS_BMI + jS_HI + jS_Ntrapped + imperv + tcd + swf_perc +
+  swf_perc + dist_road + dist_path + #soil_ph + soil_moist +
+  cat_dens + pig_dens + pou_dens + clc_fct + precipation_aug + municipality_code
+
+```
+
+## *BINOMIAL DISTRIBUTION* ~> PROBIT MODEL
+
+### Fit models for PRESENCE/ABSENCE  data 
+
+```{r}
+m <- Hmsc(Y = response_pa, XData = explanatory_var, XFormula = XFormula_OTU,
+           studyDesign=studyDesign, ranLevels=list("sample" = rL3,"locality"= rL2, "year" = rL3),
+          distr = "probit")
+```
+
+## Run model
+```{r}
+# Run Markov Chains
+# test
+m <- sampleMcmc(m, thin = 1, samples = 50)
+
+# the real model
+m <- sampleMcmc(m, thin = thin, samples = samples, transient = transient, 
+                nChains = nChains, verbose = verbose, nParallel = nChains)
+
+
+model_wd <- paste0(getwd(), "/output/jSDM_20240212")
+# Set a name for the model
+filename <- paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214.rds")
+
+#Save de model
+saveRDS(m,file=filename) 
+```

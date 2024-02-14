@@ -17,7 +17,6 @@ Using jS_ as a prefix for the variables selected in this project part (for this 
 
 ```{r prepare workspace}
 source("rscripts/source_pkgs.R")
-
 ```
 
 
@@ -82,11 +81,12 @@ allSData <- unclass(sample_data(PS.TSS_filtered)) %>%
            ## HI, the hybrid index. Hypothesis: "disturbed"
            ## microbiomes (especially mycobiomes) in hybrids as
            ## observed previously.
-           jS_HI = HI
+           jS_HI = HI,
            ## Remark: All species interaction hypotheses
            ## (e.g. parasite infections, which would be available as
            ## derived sample variables) should be addressed as part of
            ## the response variable
+           jS_loc = Locality
            ) %>%
     full_join(aggregateDensity)
 
@@ -122,7 +122,7 @@ miceData <- unclass(sample_data(PS.TSS_filtered_jS)) %>%
 
 head(miceData)
 nrow(miceData)
-# [1] 609 mice
+# [1] 607 mice
 ```
 
 ## check for missing coordinates in data
@@ -132,14 +132,8 @@ summary(miceData)
 miceData %>% 
   filter(is.na(jS_lon))
 
-## no data for this rows, REMOVE
-
-miceData <- miceData %>% 
-  filter(!is.na(jS_lon))
-
 head(miceData)
 nrow(miceData)
-# [1] 607 mice after cleaning the data
 ```
 
 
