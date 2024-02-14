@@ -6,7 +6,7 @@
 ####--------------------------------------------####
 
 mylibraries <- c("dplyr", "ggplot2", "phyloseq", "magrittr", "sf", "terra", 
-                 "tidyr", "units", "stringi", "tmap")
+                 "tidyr", "units", "stringi", "tmap", "tibble")
 
 for (i in 1:length(mylibraries)) {
   if(mylibraries[i] %in% rownames(installed.packages()) == FALSE) {install.packages(mylibraries[i])}
