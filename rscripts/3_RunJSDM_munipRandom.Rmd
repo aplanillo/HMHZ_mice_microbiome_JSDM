@@ -1,0 +1,878 @@
+---
+title: "jSDM"
+author: "Aimara Planillo"
+date: "2024-02-12"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#*******************RUN PARALLEL IN CS1************************************
+01.09.2024 This code is only for the IZW CS1, so the parallelizing works, until next server update
+```{r}
+# install.packages("RhpcBLASctl")
+library('RhpcBLASctl')
+omp_set_num_threads(1)
+blas_set_num_threads(1)
+Sys.setenv(OMP_NUM_THREADS=1, OPENBLAS_NUM_THREADS=1)
+```
+#***************************************************************************
+
+
+# jSDM for mice microbiome    
+
+We use 
+* Response: the bacterial microbiome in the mice as response.
+* Explanatory variables: environmental variables and mouse characteristics
+* Spatial effects: longitude and latitude
+* Random: year
+
+
+### prepare workspace
+```{r}
+source("rscripts/source_pkgs.R") # r libraries
+
+wrkdir <- getwd()
+model_wd <- paste0(wrkdir, "/output/jSDM_bact_fam_pa_munip_202403")
+```
+
+### load data
+```{r}
+# mice related data
+mice_data <- read.csv("./intermediate_data/Table_mice_envcov_100m.csv")
+head(mice_data)
+table(mice_data$jS_year)
+
+# microbiome bacteria data
+PS.TSS_filtered_jS <- readRDS("./intermediate_data/PSvar.rds")
+PS.TSS_filtered_jS
+
+sample_data(PS.TSS_filtered_jS@sam_data)
+## filter data for bacteria
+PS_bacteria <- subset_taxa(PS.TSS_filtered_jS, Kingdom %in%"Bacteria")
+
+PS_bacteria@otu_table
+
+## get data at family level
+rank_names(PS_bacteria)[5]
+PS_bacteria_fam <- tax_glom(PS_bacteria, taxrank = rank_names(PS_bacteria)[5])
+PS_bacteria_fam
+
+## 60 bacteria Families in 607 mice
+```
+
+
+## extract bacteria presence / absence data for each mouse
+```{r get table with pa data}
+## cahnge the row names of tax table and col names of otu tables for new ones so they are easier to merge
+rownames(PS_bacteria_fam@tax_table) <- paste0("ASV", 1:nrow(PS_bacteria_fam@tax_table))
+colnames(PS_bacteria_fam@otu_table) <- paste0("ASV", 1:ncol(PS_bacteria_fam@otu_table))
+
+PS_bacteria_fam@otu_table
+PS_bacteria_fam@tax_table
+
+otut <- data.frame(PS_bacteria_fam@otu_table)
+taxt <- data.frame(PS_bacteria_fam@tax_table)
+taxt$Family
+
+colnames(otut) <- taxt$Family
+
+head(otut)
+
+## make data presence / absence
+otut_pa <- otut
+otut_pa[otut_pa > 0] <- 1
+ 
+head(otut_pa)
+
+## need to set the mouseId as a column to merge the data later
+otut_pa <- otut_pa %>%
+  tibble::rownames_to_column("mouseID")
+
+```
+
+
+```{r check duplicates}
+## to remove duplicates, we need to transpose the data, merge the rows with the same name and transpose again to the original format
+  
+sampleID <- rownames(otut_pa)
+taxaID <- colnames(otut_pa)
+
+length(unique(taxaID)) # 61: 60 Fam + mouseID
+length(unique(sampleID)) # 607 samples
+# No dup
+```
+
+## prepare final mice data
+Assign precipitation value to the year the mouse where captured
+```{r}
+head(mice_data)
+
+mice_data %>% 
+  group_by(jS_loc) %>% 
+  # mutate(numId = seq(1:length(unique(jS_loc)))) 
+  mutate(locID =  cur_group_id()) %>% 
+  dplyr::select(jS_mouseID, locID)
+ 
+ 
+## filter environmnetal variables and set pig density NA to 0
+mice_data2 <- mice_data %>% 
+  group_by(jS_loc) %>% 
+  mutate(numlocID =  cur_group_id()) %>% 
+  mutate(locID = paste0("loc_", numlocID)) %>% 
+  ungroup() %>% 
+  mutate(precipation_aug = case_when(
+    jS_year == 2015 ~ prec_aug_2015,
+    jS_year == 2016 ~ prec_aug_2016,
+    jS_year == 2017 ~ prec_aug_2017,
+    jS_year == 2018 ~ prec_aug_2018,
+    TRUE ~NA)) %>% 
+  mutate(jS_sex = as.factor(jS_sex), 
+         municipality_code = as.factor(as.character(gem_char)), 
+         clc_fct = as.factor(clc_fct)) %>% 
+  mutate(pig_dens = replace_na(pig_dens, 0)) %>% 
+  dplyr::select(-c(jS_loc, prec_aug_2015, prec_aug_2016, prec_aug_2017, prec_aug_2018, 
+                   ID, CATO, PITO, POTO, gem_char))
+mice_data2
+
+## add bacteria
+all_data <- mice_data2 %>% 
+  left_join(otut_pa, by = c("jS_mouseID" = "mouseID"))
+
+head(all_data)
+```
+
+
+# Run jSDM
+
+For the JSDM we need:
+- a matrix of species: sites in rows (mice) and species in columns (OTU)
+- a data frame with the environmental covariates for sites: sites (mice) in rows, same order as above
+- random structure
+- spatial structure
+
+## Set up variables and model structure
+
+```{r}
+colnames(all_data)
+
+# response matrix 
+my_response <- colnames(otut_pa)[-1] ## remove mouseID
+response_pa <- all_data %>% 
+  dplyr::select(all_of(my_response)) %>% 
+  as.matrix()
+
+# explanatory df
+my_cov <- c("jS_sex", "jS_BMI", "jS_HI", "jS_Ntrapped", "imperv", "tcd", 
+            "swf_perc", "dist_road", "dist_path", #"soil_moist", "soil_ph", 
+            "cat_dens", "pig_dens", "pou_dens", "clc_fct", "precipation_aug", "municipality_code")
+explanatory_var <- all_data %>% 
+  dplyr::select(all_of(my_cov)) 
+
+as.data.frame(explanatory_var[!complete.cases(explanatory_var),])
+
+## spatial data (wihtout duplicates)
+xyData <- all_data %>%
+  group_by(locID) %>% 
+  summarise(lon = unique(jS_lon), 
+            lat = unique(jS_lat)) %>% 
+  tibble::column_to_rownames("locID")
+
+## two nested random effects
+studyDesign <- data.frame(sample = as.factor(all_data$jS_mouseID), 
+                          locality = as.factor(all_data$locID), 
+                          municipality = as.factor(all_data$municipality_code),
+                          year = as.factor(all_data$jS_year))
+
+
+rL3 <- HmscRandomLevel(units = levels(all_data$jS_year)) # account for temporal correlation
+rL2 <- HmscRandomLevel(units = levels(all_data$municipality_code)) # accounts for nested sampling 
+rL1 <- HmscRandomLevel(sData = xyData, units = levels(all_data$locID)) # accounts for spatial locations
+
+```
+
+
+### Define MCMC parameters
+```{r}
+## Initial parameters to test the data
+thin <- 10
+samples <- 1000
+transient <- 100
+nChains <- 5
+verbose <- 1000
+
+# Regression formula with all environmental covariates
+
+## there are many NA in soil ph and soil moisture is correlated to precipitation, thus we remove those variables
+XFormula_OTU = ~ jS_sex + jS_BMI + jS_HI + jS_Ntrapped + imperv + tcd + swf_perc +
+  swf_perc + dist_road + dist_path + #soil_ph + soil_moist +
+  cat_dens + pig_dens + pou_dens + clc_fct + precipation_aug 
+
+## no traits or phylogeny are used at this time
+
+```
+
+## *BINOMIAL DISTRIBUTION* ~> PROBIT MODEL
+
+### Fit models for PRESENCE/ABSENCE  data 
+
+```{r}
+m <- Hmsc(Y = response_pa, XData = explanatory_var, XFormula = XFormula_OTU,
+           studyDesign=studyDesign, ranLevels=list("locality"= rL1, "municipality" = rL2, "year" = rL3),
+          distr = "probit")
+```
+
+## Run model
+```{r}
+# Run Markov Chains
+# test
+m <- sampleMcmc(m, thin = 1, samples = 20)
+
+# the real model
+m <- sampleMcmc(m, thin = thin, samples = samples, transient = transient, 
+                nChains = nChains, verbose = verbose, nParallel = nChains)
+
+
+# Set a name for the model
+filename <- paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311.rds")
+
+#Save de model
+saveRDS(m,file=filename) 
+# m <- readRDS(filename)
+```
+
+# Check the model
+
+## Model convergence 
+
+We evaluate MCMC convergence in terms of two kinds of parameters that we are especially interested in:
+the species niches Beta, influence of traits on species niches Gamma, and the residual species associations Omega. 
+The strength of phylogenetic signal rho was not included in this model
+
+Evaluate convergence: Effective sample size and gelman-rubin diagnostic (potencial reduction factor)
+One can then reason that we should run our chains until the value of R is close to 1, (< 1.1).
+```{r model convergence}
+m
+```
+Hmsc object with 607 sampling units, 60 species, 18 covariates, 1 traits and 3 random levels
+Posterior MCMC sampling with 5 chains each with 1000 samples, thin 10 and transient 100 
+
+
+```{r model convergence}
+mpost <- convertToCodaObject(m)
+
+# Numerical output
+ess.beta <- effectiveSize(mpost$Beta)
+gd.beta <- gelman.diag(mpost$Beta, multivariate = FALSE)$psrf
+# ess.gamma <- effectiveSize(mpost$Gamma)
+# gd.gamma <- gelman.diag(mpost$Gamma, multivariate = FALSE)$psrf
+ess.omega <- effectiveSize(mpost$Omega[[1]])
+gd.omega <- gelman.diag(mpost$Omega[[1]], multivariate = FALSE)$psrf
+
+convergence.names <- c("ess.beta", 
+                       # "ess.gamma", 
+                       "ess.omega", 
+                       "gd.beta", 
+                       # "gd.gamma", 
+                       "gd.omega")
+convergence.list <- list(ess.beta, 
+                         # ess.gamma, 
+                         ess.omega, 
+                         gd.beta, 
+                         # gd.gamma, 
+                         gd.omega)
+for (i in 1:length(convergence.names)){
+  write.csv(convergence.list[[i]], 
+            paste0(model_wd, "/", convergence.names[i], ".csv"))
+}
+
+# Graphical output
+png(paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311_convergence_hist.png"), width = 800, height = 1000,
+    pointsize = 20)
+par(mfrow=c(2,2))
+hist(ess.beta, main = "ess(beta)_Metabarcoding_mice")
+# hist(ess.gamma, main = "ess(gamma)_Metabarcoding_foxes")
+hist(ess.omega, main = "ess(omega)_Metabarcoding_mice")
+hist(gd.beta, main = "psrf(beta)_Metabarcoding_mice")
+# hist(gd.gamma, main = "psrf(gamma)_Metabarcoding_foxes")
+hist(gd.omega, main = "psrf(omega)_Metabarcoding_mice")
+dev.off()
+
+# Save plots of the chains
+MCMCtrace(mpost$Beta, 
+          pdf = TRUE, 
+          open_pdf = FALSE,
+          filename = "JSDM_mice_microbiome_pa_20240311_MCMCtrace_beta",
+          wd = model_wd)
+# MCMCtrace(mpost$Gamma, 
+#           pdf = TRUE, 
+#           open_pdf = FALSE,
+#           filename = "JSDM_mice_microbiome_bacteria_pa_20240214_MCMCtrace_gamma",
+#           wd = model_wd)
+MCMCtrace(mpost$Omega[[1]], 
+          pdf = TRUE, 
+          open_pdf = FALSE,
+          filename = "JSDM_mice_microbiome_pa_20240311_MCMCtrace_omega",
+          wd = model_wd)
+
+par(mfrow=c(1,1))
+```
+
+```{r}
+mean(ess.beta) #[1] 4354.478
+mean(gd.beta) #[1] 1.002497
+
+# mean(ess.gamma) 
+# mean(gd.gamma) 
+
+mean(ess.omega) # [1] 3264.939
+mean(gd.omega) #[1] 1.005815
+
+```
+
+```{r}
+saveRDS(mpost, paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311_mpost_coda.rds"))
+# mpost <- readRDS(paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311_mpost_coda.rds"))
+```
+
+
+## Model Fit (R2)
+```{r model fit}
+# Explanatory R2. Get predictions for the observed values 
+preds <- computePredictedValues(m, expected = TRUE)
+preds.values <- apply(abind(preds,along=3),c(1,2), median) # Median of the predictions
+write.csv(preds.values, paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311_Predicted_values_median.csv"))
+preds.values.mean <- apply(abind(preds, along = 3), c (1,2), mean) # Mean of the predictions
+write.csv(preds.values.mean, paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311_Predicted_values_mean.csv"))
+
+# R2 with the built in function
+modelr2.explanatory <- evaluateModelFit(hM = m, predY = preds)
+modelr2.explanatory
+```
+
+
+```{r}
+# R2 of the model
+mean(modelr2.explanatory$TjurR2)
+# [1] 0.06679623
+
+# AUC of the model
+mean(modelr2.explanatory$AUC)
+# [1] 0.7582234
+
+temp.r2 <- cbind.data.frame(r2 = as.numeric(modelr2.explanatory$TjurR2), 
+                            species = as.character(m$spNames))
+ggplot(data = temp.r2, aes(y=r2, x=species))+
+  geom_point()
+write.csv(modelr2.explanatory, paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311_explanatory_R2_default.csv"), row.names = FALSE)
+
+
+# R2 Manually comparing observed vs predicted
+R2.sp <- matrix(NA, m$ns, 1)
+for (i in 1:m$ns) {
+  R2.sp[i, ] <- cor(preds.values.mean[, i],m$Y[, i])^2
+}
+
+mean(R2.sp, na.rm=TRUE)
+# [1] 0.09546188
+
+# Plot of the default R2
+ggplot(data = as.data.frame(modelr2.explanatory$TjurR2), aes(y=modelr2.explanatory$TjurR2, x=temp.r2$species))+
+  geom_point() +
+  xlab("Species") +
+  ylab("R2 for each species") +
+  ggtitle(paste0("Bacteria OTU in mice - Default Tjur R2 species \n R2 = ", 
+                   round(mean(modelr2.explanatory$TjurR2, na.rm = TRUE), 2)))
+ggsave(paste0(model_wd, "/Plot_JSDM_mice_microbiome_pa_20240311_R2_species_default.png"))
+
+
+# Plot of the manual R2
+ggplot(data = as.data.frame(R2.sp), aes(y=V1, x=temp.r2$species))+
+  geom_point() +
+  xlab("Species") +
+  ylab("R2 for each species") +
+  ggtitle(paste0("Bacteria OTU in mice - Obs vs pred R2 species \n R2 = ", 
+                   round(mean(R2.sp, na.rm = TRUE), 2)))
+ggsave(paste0(model_wd, "/Plot_JSDM_mice_microbiome_pa_20240311_R2_species_manual.png"))
+```
+
+```{r site R2}
+R2.site <- matrix(NA, m$ny, 1)
+for (i in 1:m$ny) {
+  R2.site[i, ] <- cor(preds.values.mean[i, ], m$Y[i, ])^2
+}
+mean(R2.site, na.rm = TRUE)
+# [1] 0.5114522
+```
+
+## Beta values
+
+```{r betas}
+Beta.results <- as.data.frame(MCMCsummary(mpost$Beta))
+write.csv(Beta.results, paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311_beta_coeffients.csv"), row.names = TRUE)
+# Default beta plot in Hmsc package
+postBeta <- getPostEstimate(m, parName = "Beta")
+saveRDS(postBeta, file=paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311_postBeta.rds"))
+png(paste0(model_wd, "/Plot_JSDM_mice_microbiome_pa_20240311_beta_support95.png"))
+plotBeta(m, post = postBeta, param = "Support", supportLevel = 0.95)
+dev.off()
+  
+png(paste0(model_wd, "/Plot_JSDM_mice_microbiome_pa_20240311_beta_support75.png"))
+plotBeta(m, post = postBeta, param = "Support", supportLevel = 0.75)
+dev.off()
+```
+
+
+```{r betas - caterpillar plots}
+
+myOTU <- colnames(m$Y)
+head(mpost$Beta[[1]])
+
+summary(mpost$Beta)$quantiles[,1]
+
+modelFrame_plot <- data.frame(Variable = colnames(mpost$Beta[[1]]),
+                          Coefficient = summary(mpost$Beta)$statistics[,1],
+                          CI_low = summary(mpost$Beta)$quantiles[,1],
+                          Q_25 = summary(mpost$Beta)$quantiles[, 2],
+                          Q_50 = summary(mpost$Beta)$quantiles[,3],
+                          Q_75 = summary(mpost$Beta)$quantiles[, 4],
+                          CI_high = summary(mpost$Beta)$quantiles[,5])
+
+modelFrame_plot$OTU <- rep(myOTU, each = 18)
+modelFrame_plot$myVariables <- stringr::str_sub(stringr::word(modelFrame_plot$Variable, 1), 3, -1)
+
+head(modelFrame_plot)
+
+modelFrame_plot[65,]
+
+# allModelFrame$Variable <- factor(allModelFrame$Variable, levels = rev(my_variables))
+# allModelFrame$Species <- factor(allModelFrame$Species,levels = c("Wolf", "Fox", "Badger", "Marten"))
+
+write.csv(modelFrame_plot, paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311_beta_modelFrame.csv"), row.names = FALSE)
+
+# variables with CRI not overlapping 0 (credible interval)
+modelFrame_plot <- modelFrame_plot %>%
+  mutate(significant = case_when(
+    CI_low < 0 & CI_high < 0 ~ "Yes",
+    CI_low > 0 & CI_high > 0 ~ "Yes", 
+    TRUE ~ "No"))
+ 
+# Plot
+zp1 <- ggplot(modelFrame_plot, aes(group = OTU, colour = OTU)) + 
+  geom_hline(yintercept = 0, colour = gray(1/2), lty = 2) + 
+  geom_linerange(aes(x = Variable, ymin = CI_low,
+                                ymax = CI_high, fill = significant),
+                            lwd = 0.8, position = position_dodge(width = 1.2/2)) + 
+  geom_linerange(aes(x = Variable, ymin = Q_25,
+                                ymax = Q_75, fill = significant),
+                            lwd = 1.5, position = position_dodge(width = 1.2/2)) + 
+  geom_pointrange(aes(x = Variable, y = Coefficient, ymin = Q_25,
+                                 ymax = Q_75, fill = significant),
+                             lwd = 1/2, shape = 21, position = position_dodge(width = 1.2/2)) +
+  scale_fill_manual(values = c("White", "black"))+
+  
+  # scale_y_continuous(limits = c(-4.2, 3)) +
+  coord_flip() + 
+  scale_colour_viridis_d(option = "viridis", begin = 0.1, end = 0.9, 
+                         guide = guide_legend(reverse = TRUE)) +
+  theme(
+    panel.background = element_rect(fill = NA),
+    panel.grid.major = element_blank(), 
+    axis.line = element_line(colour = "black")) +
+    ggtitle("Carnivore community responses, 95CrI")
+
+
+zp1
+
+# ggsave(plot = zp1, paste0(model_wd, "/DET_coefs_fall_springs_allspecies.png"))
+
+# Plotting and saving the effects of hte variables
+for (i in 1:length(unique(modelFrame_plot$myVariables))){
+  var <- unique(modelFrame_plot$myVariables)[i]
+  
+  myplot <- modelFrame_plot %>% 
+    filter(myVariables == var) %>% 
+  ggplot(aes(group = OTU, colour = OTU)) + 
+  geom_hline(yintercept = 0, colour = gray(1/2), lty = 2) + 
+  geom_linerange(aes(x = OTU, ymin = CI_low,
+                                ymax = CI_high, fill = significant),
+                            lwd = 0.8, position = position_dodge(width = 1.2/2)) + 
+  geom_linerange(aes(x = OTU, ymin = Q_25,
+                                ymax = Q_75, fill = significant),
+                            lwd = 1.5, position = position_dodge(width = 1.2/2)) + 
+  geom_pointrange(aes(x = OTU, y = Coefficient, ymin = Q_25,
+                                 ymax = Q_75, fill = significant),
+                             lwd = 1/2, shape = 21, position = position_dodge(width = 1.2/2)) +
+  scale_fill_manual(values = c("White", "black"))+
+  
+  # scale_y_continuous(limits = c(-4.2, 3)) +
+  coord_flip() + 
+  scale_colour_viridis_d(option = "viridis", begin = 0.1, end = 0.9, 
+                         guide = guide_legend(reverse = TRUE)) +
+  theme(
+    panel.background = element_rect(fill = NA),
+    panel.grid.major = element_blank(), 
+    axis.line = element_line(colour = "black"),
+    legend.position = "NONE") +
+    ggtitle(paste0("Effects of ", var))
+  
+  plotfile <- paste0(model_wd, "/BetaPlots/Plot_betas_", var, ".png")
+  ggsave(plot = myplot, plotfile, height = 8, width = 6)
+  
+}
+
+```
+
+```{r betas - myplots}
+# Coef plot for betas for each species
+pdf(paste0(model_wd, "/Plot_0.5114522_beta_coef_plots.pdf"))
+MCMCplot(mpost$Beta, 
+           ref_ovl = TRUE,
+           rank = T,
+           xlab = 'ESTIMATE',
+           sz_labels = 0.3,
+           sz_med = 1,
+           sz_thick = 3,
+           sz_thin = 1,
+           sz_ax = 1,
+           sz_main_txt = 1)
+dev.off()
+
+
+# Print a plot for each predictor
+n.cov <- length(m$covNames) # Number of covariates without the intercept
+var.code <- vector()
+for (i in 1:n.cov){
+    var.code[i] <- paste0("C", i)
+  }
+  
+var.name <- as.vector(m$covNames[1:n.cov])
+predictors <- as.data.frame(cbind(var.code, var.name))
+  
+for (i in 1:nrow(predictors)){
+    pdf(paste0(model_wd, "/Betas_covariates_coef_plot_", 
+               var.name[i], "_JSDM_mice_microbiome_pa_20240311.pdf"))
+    MCMCplot(mpost$Beta,
+             params = predictors[i,1],
+             ISB = FALSE,
+             ref_ovl = TRUE,
+             rank = FALSE,
+             xlab = 'ESTIMATE',
+             main = predictors[i,2],
+             sz_labels = 0.5,
+             sz_med = 1,
+             sz_thick = 1,
+             sz_thin = 1,
+             sz_ax = 1,
+             sz_main_txt = 1)
+    dev.off()
+}
+
+```
+
+
+## Speceis co-occurrences 
+
+We do it throuch species associations in residual random variance
+
+```{r sp associations}
+OmegaCor <- computeAssociations(m)
+class(OmegaCor)
+saveRDS(OmegaCor, file=paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214_OmegaCor.rds"))
+# OmegaCor <- readRDS(paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214_OmegaCor.rds"))
+OmegaCor[[1]]$mean
+OmegaCor[[1]]$support
+
+# Default plot in Hmsc package
+supportLevel <- 0.95
+
+toPlot <- ((OmegaCor[[1]]$support > supportLevel)
+           + (OmegaCor[[1]]$support < (1 - supportLevel)) > 0) * OmegaCor[[1]]$mean
+png(paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214_default_omegaplot95.png"))
+corrplot(toPlot, method = "color", 
+         col = colorRampPalette(c("blue", "white", "red"))(200),
+         title = paste0("random effect level: ", m$rLNames[1]), 
+         mar = c(0,0,1,0))
+dev.off()
+
+supportLevel <- 0.75
+toPlot <- ((OmegaCor[[1]]$support > supportLevel)
+           + (OmegaCor[[1]]$support < (1 - supportLevel)) > 0) * OmegaCor[[1]]$mean
+# png(paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214_default_omegaplot75.png"))
+corrplot(toPlot, method = "color", 
+         col = colorRampPalette(c("blue", "white", "red"))(200),
+         title = paste0("random effect level: ", m$rLNames[1]), 
+         mar = c(0,0,1,0))
+# dev.off()
+
+par(mar = c (5,5,4,5))
+```
+
+
+```{r save associations}
+assoc.mean <- melt(OmegaCor[[1]]$mean)
+assoc.support <- melt(OmegaCor[[1]]$support)
+
+nrow(assoc.mean); nrow(assoc.support)
+
+associations <- cbind.data.frame(assoc.mean, support = assoc.support$value)
+colnames(associations) <- c("species1", "species2", "mean", "support")
+
+associations
+
+write.csv(associations, paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214_sp_associations.csv"), row.names = FALSE)
+```
+
+## Variance partitioning
+
+The order of the variables, if they are continuous, is 
+1. intercept(this can be in any group)
+2. first variable
+3. second variable
+ETC.
+
+The formulas we used for running the models area: 
+XFormula = ~ (tree.100m + open.green100m + noise.100m + pop.100m) * prey.abu
+
+```{r variance partitioning}
+# design matrix
+head(m$X)
+
+m$XFormula
+# Total variance explained by hte model can be partition into the contributions
+# of each fixed effect (or group) and random effect
+# intercept can go in any group. Here in the first to simplify
+# Groups: season, garden, landscape, cats
+VP <- computeVariancePartitioning(m, group = c(1,1, 1, 1, 2, 3,3,3, 3, 3, 4, 4, 4, 5, 5, 5, 5, 6),
+                                  groupnames = c("mouse_characteristics", "mouse_dens", "environ", "farm_animals", "clc", "precipitation"))
+
+# Save the Variance partitioning info
+VP$vals
+VP$R2T
+
+saveRDS(VP, file = paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214_varpart.rds"))
+
+VP.table <- as.data.frame(VP$vals) 
+VP.table
+write.csv(VP.table, paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214_varpart_values.csv"))
+
+
+# plot var part
+png(paste0(model_wd, "/Plot_JSDM_mice_microbiome_bacteria_pa_20240214_default_VP.png"), 
+    width = 800)
+plotVariancePartitioning(m, VP = VP, las = 2, cex.names = 0.8)
+title(main = "\n Bacteria in mice microbiome")
+dev.off()
+```
+
+
+
+
+#### ------------------- ########
+THIS IS FOR PLOTTING 
+#### ------------------- ########
+
+## Predicted responses 95CI
+
+### Example full community
+```{r}
+m$XFormula
+head(m$X)
+
+Gradient.distroad <- constructGradient(m, focalVariable = "dist_road")
+predY <- predict(m, XData = Gradient.distroad$XDataNew, studyDesign = Gradient.distroad$studyDesignNew, 
+                 ranLevels = Gradient.distroad$rLNew, expected = TRUE)
+
+# Summed response to season
+plotGradient(m, Gradient.distroad, pred=predY, measure="S", las=1,
+             showData = TRUE, main='Species richness based on distance to road')
+```
+
+
+```{r other plotting alternatives}
+# Species 10
+plotGradient(m, Gradient.season, pred=predY, measure="Y", index=3, las=1,
+             showData = TRUE, main='Focal species occurrence (measure="Y", species = 3)')
+# Community-weighted mean values of traits
+# plotGradient(m, Gradient.season, pred=predY, measure="T", index=2, las=1,
+#              showData = TRUE, main='Mean trait value (measure="T")')
+
+
+# Summed response to tree
+Gradient.tree <- constructGradient(m, focalVariable = "tree_cover_100")
+predY.tree <- predict(m, XData = Gradient.tree$XDataNew, 
+                 studyDesign = Gradient.tree$studyDesignNew, 
+                 ranLevels = Gradient.tree$rLNew, expected = FALSE)
+saveRDS(predY.tree, paste0(det_model_wd, "/pred_response_tree.rds"))
+
+plotGradient(m, Gradient.tree, pred=predY.tree, measure="S", las=1,
+             showData = TRUE, main='Total abundance')
+```
+
+
+# 3. Species Associations - Circular plot 
+
+Plot the species associations categorizing the taxa by some grouping characteristic
+We use a Hierarchical edge bundling plot
+
+To create a bundling graph we need a hierarchy that is going to be used for the dendrogram. 
+We add higher categories to our species, grouping them by env response, that we will use later for plotting
+
+We also need to create the edges: data frame giving the hierarchical structure of the species,
+grouped by species group
+
+
+### Packages
+```{r packages}
+library(ggraph)
+library(igraph)
+```
+
+## Ploting
+
+```{r load data}
+
+# Taxa 
+m <- readRDS(paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311.rds"))
+response <- as.data.frame(m$Y)
+
+# Taxa assoc
+associations <- read.csv(paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214_sp_associations.csv"))
+head(associations)
+
+# groups
+my_groups <- read.csv(**write file here**)
+
+## create random grouping as example
+# taxa
+my_groups <- data.frame(species = unique(associations$species1))
+# grouping in three groups, as an example, no need 
+my_groups$group <- as.factor(rep(c("one", "two", "three"), times = 20))
+# n sites it was detected
+nsites <- data.frame(species = colnames(response), 
+                     nsites = colSums(response))
+my_groups <- my_groups %>% 
+  left_join(nsites, by = "species")
+
+my_groups
+
+## Get sp names for the plots
+associations$sp1 <- as.character(associations$species1)
+associations$sp2 <- as.character(associations$species2)
+  
+head(associations, 20)  
+
+# Select association that are significant in the 95% CI
+assoc_corr95 <- associations %>%
+  filter(support < 0.025 | support > 0.975) %>%
+  filter(species1 != species2) %>%
+  dplyr::select(from = sp1, to = sp2, mean = mean, support = support) %>%
+  mutate(correl = ifelse(mean < 0, "neg", "pos"))
+
+nrow(assoc_corr95)
+head(assoc_corr95)
+```
+
+```{r prepare hierarchical edge bundling plot}
+# groups
+d1 <- data.frame(from = "origin", to = levels(my_groups$group))
+
+# Then we assign the species to the groups
+d2 <- data.frame(from = my_groups$group, to = my_groups$species)
+edges <- rbind(d1, d2)
+nrow(edges)
+
+## prepare nodes
+#We use the number of sites that the species was detected for the size of the dots
+vertices <- data.frame(name = unique(c(as.character(edges$from), as.character(edges$to))))
+nrow(vertices)
+
+vertices$size <- c(rep(NA, 4), my_groups$nsites)
+vertices$group = edges$from[match( vertices$name, edges$to )]
+head(vertices, 10)
+
+# Reorder the data following the order we are interested in for representation:
+# so all the species in the same group appear together
+edges.ord <- edges[order(edges$from),]
+vertices.ord <- vertices[order(vertices$group,vertices$name),]
+head(vertices.ord, 10)
+
+## calculate the ANGLE of the labels for plotting
+vertices.ord$id=NA
+myleaves <- which(is.na(match(vertices.ord$name, edges.ord$from))) # Select the rows with the final species, not the groups
+nleaves <- length(myleaves) # This should be the number of species
+vertices.ord$id[myleaves] <- seq(1:nleaves)
+
+# First angle to calculate horizontal adjustment
+vertices.ord$angle <- 90 - 360*vertices.ord$id/nleaves
+
+# calculate the alignment of labels: right or left
+# If I am on the left part of the plot, my labels have currently an angle < -90
+vertices.ord$hjust<-ifelse( vertices.ord$angle < -90, 1, 0)
+
+# flip angle BY to make them readable
+vertices.ord$angle<-ifelse(vertices.ord$angle < -90, vertices.ord$angle+180, vertices.ord$angle)
+
+head(vertices.ord, 10)
+tail(vertices.ord, 10)
+```
+
+```{r create graph object and plot}
+# give data graph format
+mygraph <- graph_from_data_frame(d = edges.ord, vertices = vertices.ord)
+
+# The connection object must refer to the ids of the leaves:
+from <- match(assoc_corr95$from, vertices.ord$name)
+to <- match(assoc_corr95$to, vertices.ord$name)
+
+# we transform the correlations into positive or negative to better plot
+connections <- assoc_corr95 %>%
+  mutate (correlation = ifelse(mean > 0, "positive", "negative"))
+connections
+
+my.plot <- ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
+  geom_conn_bundle(data = get_con(from = from, to = to, values = connections$correlation), 
+                   alpha = 0.2, width = 1.2, tension = 0.7, aes(colour = factor(values)), 
+                   show.legend = TRUE) +
+  geom_node_text(aes(x = x*1.2, y = y*1.2, filter = leaf, label = name, angle = angle, 
+                     hjust = hjust), size = 3.5, alpha = 0.7) +
+  geom_node_point(aes(filter = leaf, x = x*1.07, y = y*1.07, #colour = group, 
+                      size = size, alpha=0.5)) +  
+  expand_limits(x = c(-2, 2.5), y = c(-2, 2)) +
+  # change edge color
+  scale_edge_colour_manual(values = c("firebrick4",
+                                      "midnightblue"), # if there are only positive associations 
+                            guide = guide_legend(override.aes = list(linetype = "solid",
+                                                                     colour = "grey50"
+                                                                     )),
+                           name = "Association") +
+  scale_edge_linetype("pointed") +
+  scale_size_continuous(range = c(0.2,8),
+                        breaks = c(10, 20, 50, 100, 200),
+                        name = "Number of sites") +
+  guides(size = guide_legend(order = 2),
+         # colour = "none",
+         alpha = "none") +
+  # change theme  
+  theme_minimal() +
+  theme(legend.position.inside = c(0.88, 0.2), 
+        legend.background = element_rect(fill ="#F2F2F2", colour = "grey20"), 
+        legend.title = element_text(size = 10), 
+        legend.text = element_text(size = 8),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        axis.title = element_blank(),
+        axis.text = element_blank(), 
+        plot.background=element_blank(), 
+        panel.background = element_blank())
+
+my.plot
+
+ggsave(paste0(model_wd, "/Plot_sp_associations_bundle_nsites.png"), 
+       plot = my.plot)
+```
+
