@@ -1,0 +1,324 @@
+#### ------------------- ########
+THIS IS FOR PLOTTING 
+#### ------------------- ########
+
+## Predicted responses 95CI
+
+### Example full community
+```{r}
+m$XFormula
+head(m$X)
+
+Gradient.season <- constructGradient(m, focalVariable = "season")
+predY <- predict(m, XData = Gradient.season$XDataNew, studyDesign = Gradient.season$studyDesignNew, 
+                 ranLevels = Gradient.season$rLNew, expected = FALSE)
+
+# Summed response to season
+plotGradient(m, Gradient.season, pred=predY, measure="S", las=1,
+             showData = TRUE, main='Species richness (measure="S")')
+
+# Species 10
+plotGradient(m, Gradient.season, pred=predY, measure="Y", index=3, las=1,
+             showData = TRUE, main='Focal species occurrence (measure="Y", species = 3)')
+# Community-weighted mean values of traits
+# plotGradient(m, Gradient.season, pred=predY, measure="T", index=2, las=1,
+#              showData = TRUE, main='Mean trait value (measure="T")')
+
+
+# Summed response to tree
+Gradient.tree <- constructGradient(m, focalVariable = "tree_cover_100")
+predY.tree <- predict(m, XData = Gradient.tree$XDataNew, 
+                 studyDesign = Gradient.tree$studyDesignNew, 
+                 ranLevels = Gradient.tree$rLNew, expected = FALSE)
+saveRDS(predY.tree, paste0(det_model_wd, "/pred_response_tree.rds"))
+
+plotGradient(m, Gradient.tree, pred=predY.tree, measure="S", las=1,
+             showData = TRUE, main='Total abundance')
+```
+
+### Predicted responses 95CI by species
+
+```{r}
+
+```
+
+### Caterpillar plots
+```{r}
+head(mpost$Beta)
+mpost.beta.fox <- mpost$Beta[,1:14]
+mpost.beta.raccoon <- mpost$Beta[,15:28]
+mpost.beta.marten <- mpost$Beta[,29:42]
+
+head(mpost.beta.raccoon)
+
+colnames(mpost.beta.fox[[1]])
+my_variables <- c("Intercept", "Sprin19", "Spring20", 
+                  "No_compost", "Open_compost", "Garden_size", "Local_tree_cover", "Fence_height",
+                  "Human_population", "Impervious_surface", "Noise", "Tree_cover", "D_CityBorder", "Cat")
+
+#rename columns in betas
+for (i in 1:length(mpost.beta.fox)){
+  colnames(mpost.beta.fox[[i]]) <- my_variables
+}
+for (i in 1:length(mpost.beta.raccoon)){
+  colnames(mpost.beta.raccoon[[i]]) <- my_variables
+}
+for (i in 1:length(mpost.beta.marten)){
+  colnames(mpost.beta.marten[[i]]) <- my_variables
+}
+
+# for one model
+mcmc_intervals(mpost.beta.fox) 
+
+# for multiple models (ggplot)
+head(mpost.beta.fox)
+
+summary(mpost.beta.fox)$statistics
+summary(mpost.beta.fox)$quantiles
+
+
+# Put model estimates into temporary data.frames:
+model1Frame <- data.frame(Variable = my_variables,
+                          Coefficient = summary(mpost.beta.fox)$statistics[,1],
+                          CI_low = summary(mpost.beta.fox)$quantiles[,1],
+                          Q_25 = summary(mpost.beta.fox)$quantiles[, 2],
+                          Q_50 = summary(mpost.beta.fox)$quantiles[,3],
+                          Q_75 = summary(mpost.beta.fox)$quantiles[, 4],
+                          CI_high = summary(mpost.beta.fox)$quantiles[,5],
+                          Species = "Fox")
+
+model2Frame <- data.frame(Variable = my_variables,
+                          Coefficient = summary(mpost.beta.raccoon)$statistics[,1],
+                          CI_low = summary(mpost.beta.raccoon)$quantiles[,1],
+                          Q_25 = summary(mpost.beta.raccoon)$quantiles[, 2],
+                          Q_50 = summary(mpost.beta.raccoon)$quantiles[,3],
+                          Q_75 = summary(mpost.beta.raccoon)$quantiles[, 4],
+                          CI_high = summary(mpost.beta.raccoon)$quantiles[,5],
+                          Species = "Raccoon")
+
+model3Frame <- data.frame(Variable = my_variables,
+                          Coefficient = summary(mpost.beta.marten)$statistics[,1],
+                          CI_low = summary(mpost.beta.marten)$quantiles[,1],
+                          Q_25 = summary(mpost.beta.marten)$quantiles[, 2],
+                          Q_50 = summary(mpost.beta.marten)$quantiles[,3],
+                          Q_75 = summary(mpost.beta.marten)$quantiles[, 4],
+                          CI_high = summary(mpost.beta.marten)$quantiles[,5],
+                          Species = "Marten")
+
+
+# Combine these data.frames
+allModelFrame <- data.frame(rbind(model3Frame, model1Frame, model2Frame))  # We put marten first
+
+allModelFrame$Variable <- factor(allModelFrame$Variable, levels = rev(my_variables))
+allModelFrame$Species <- factor(allModelFrame$Species,levels = c("Raccoon", "Fox", "Marten"))
+summary(allModelFrame)
+# write.csv(allModelFrame, paste0(det_plots_wd, "/DET_fall_2springs_ModelFrame.csv"), row.names = FALSE)
+
+allModelFrame[allModelFrame$Variable == "Human_population", ]
+
+# Specify the width of your confidence intervals
+# interval1 <- -qnorm((1-0.9)/2)  # 90% multiplier
+# interval2 <- -qnorm((1-0.95)/2)  # 95% multiplier
+
+# variables with CRI not overlapping 0
+allModelFrame <- allModelFrame %>%
+  mutate(significant = case_when(
+    CI_low < 0 & CI_high < 0 ~ "Yes",
+    CI_low > 0 & CI_high > 0 ~ "Yes", 
+    TRUE ~ "No"))
+ 
+
+# Plot
+zp1 <- ggplot(allModelFrame, aes(group = Species, colour = Species)) + 
+  geom_hline(yintercept = 0, colour = gray(1/2), lty = 2) + 
+  geom_linerange(aes(x = Variable, ymin = CI_low,
+                                ymax = CI_high, fill = significant),
+                            lwd = 0.8, position = position_dodge(width = 1.2/2)) + 
+  geom_linerange(aes(x = Variable, ymin = Q_25,
+                                ymax = Q_75, fill = significant),
+                            lwd = 1.5, position = position_dodge(width = 1.2/2)) + 
+  geom_pointrange(aes(x = Variable, y = Coefficient, ymin = Q_25,
+                                 ymax = Q_75, fill = significant),
+                             lwd = 1/2, shape = 21, position = position_dodge(width = 1.2/2)) +
+  scale_fill_manual(values = c("White", "black"))+
+  
+  scale_y_continuous(limits = c(-4.2, 3)) +
+  coord_flip() + 
+  scale_colour_viridis_d(option = "viridis", begin = 0.1, end = 0.9, 
+                         guide = guide_legend(reverse = TRUE)) +
+  theme(
+    panel.background = element_rect(fill = NA),
+    panel.grid.major = element_blank(), 
+    axis.line = element_line(colour = "black")) +
+    ggtitle("Urban mesocarnivores spatial responses, 95CI")
+
+
+zp1
+
+ggsave(plot = zp1, paste0(det_plots_wd, "/DET_coefs_fall_springs_allspecies.png"))
+
+```
+
+# 3. Species Associations - Circular plot 
+
+Plot the species associations categorizing the taxa by some grouping characteristic
+We use a Hierarchical edge bundling plot
+
+To create a bundling graph we need a hierarchy that is going to be used for the dendrogram. 
+We add higher categories to our species, grouping them by env response, that we will use later for plotting
+
+We also need to create the edges: data frame giving the hierarchical structure of the species,
+grouped by species group
+
+
+### Packages
+```{r packages}
+library(ggraph)
+library(igraph)
+```
+
+## Ploting
+
+```{r load data}
+
+# Taxa 
+m <- readRDS(paste0(model_wd, "/JSDM_mice_microbiome_pa_20240311.rds"))
+response <- as.data.frame(m$Y)
+
+# Taxa assoc
+associations <- read.csv(paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214_sp_associations.csv"))
+head(associations)
+
+# groups
+my_groups <- read.csv(**write file here**)
+
+## create random grouping as example
+# taxa
+my_groups <- data.frame(species = unique(associations$species1))
+# grouping in three groups, as an example, no need 
+my_groups$group <- as.factor(rep(c("one", "two", "three"), times = 20))
+# n sites it was detected
+nsites <- data.frame(species = colnames(response), 
+                     nsites = colSums(response))
+my_groups <- my_groups %>% 
+  left_join(nsites, by = "species")
+
+my_groups
+
+## Get sp names for the plots
+associations$sp1 <- as.character(associations$species1)
+associations$sp2 <- as.character(associations$species2)
+  
+head(associations, 20)  
+
+# Select association that are significant in the 95% CI
+assoc_corr95 <- associations %>%
+  filter(support < 0.025 | support > 0.975) %>%
+  filter(species1 != species2) %>%
+  dplyr::select(from = sp1, to = sp2, mean = mean, support = support) %>%
+  mutate(correl = ifelse(mean < 0, "neg", "pos"))
+
+nrow(assoc_corr95)
+head(assoc_corr95)
+```
+
+```{r prepare hierarchical edge bundling plot}
+# groups
+d1 <- data.frame(from = "origin", to = levels(my_groups$group))
+
+# Then we assign the species to the groups
+d2 <- data.frame(from = my_groups$group, to = my_groups$species)
+edges <- rbind(d1, d2)
+nrow(edges)
+
+## prepare nodes
+#We use the number of sites that the species was detected for the size of the dots
+vertices <- data.frame(name = unique(c(as.character(edges$from), as.character(edges$to))))
+nrow(vertices)
+
+vertices$size <- c(rep(NA, 4), my_groups$nsites)
+vertices$group = edges$from[match( vertices$name, edges$to )]
+head(vertices, 10)
+
+# Reorder the data following the order we are interested in for representation:
+# so all the species in the same group appear together
+edges.ord <- edges[order(edges$from),]
+vertices.ord <- vertices[order(vertices$group,vertices$name),]
+head(vertices.ord, 10)
+
+## calculate the ANGLE of the labels for plotting
+vertices.ord$id=NA
+myleaves <- which(is.na(match(vertices.ord$name, edges.ord$from))) # Select the rows with the final species, not the groups
+nleaves <- length(myleaves) # This should be the number of species
+vertices.ord$id[myleaves] <- seq(1:nleaves)
+
+# First angle to calculate horizontal adjustment
+vertices.ord$angle <- 90 - 360*vertices.ord$id/nleaves
+
+# calculate the alignment of labels: right or left
+# If I am on the left part of the plot, my labels have currently an angle < -90
+vertices.ord$hjust<-ifelse( vertices.ord$angle < -90, 1, 0)
+
+# flip angle BY to make them readable
+vertices.ord$angle<-ifelse(vertices.ord$angle < -90, vertices.ord$angle+180, vertices.ord$angle)
+
+head(vertices.ord, 10)
+tail(vertices.ord, 10)
+```
+
+```{r create graph object and plot}
+# give data graph format
+mygraph <- graph_from_data_frame(d = edges.ord, vertices = vertices.ord)
+
+# The connection object must refer to the ids of the leaves:
+from <- match(assoc_corr95$from, vertices.ord$name)
+to <- match(assoc_corr95$to, vertices.ord$name)
+
+# we transform the correlations into positive or negative to better plot
+connections <- assoc_corr95 %>%
+  mutate (correlation = ifelse(mean > 0, "positive", "negative"))
+connections
+
+my.plot <- ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
+  geom_conn_bundle(data = get_con(from = from, to = to, values = connections$correlation), 
+                   alpha = 0.2, width = 1.2, tension = 0.7, aes(colour = factor(values)), 
+                   show.legend = TRUE) +
+  geom_node_text(aes(x = x*1.2, y = y*1.2, filter = leaf, label = name, angle = angle, 
+                     hjust = hjust), size = 3.5, alpha = 0.7) +
+  geom_node_point(aes(filter = leaf, x = x*1.07, y = y*1.07, #colour = group, 
+                      size = size, alpha=0.5)) +  
+  expand_limits(x = c(-2, 2.5), y = c(-2, 2)) +
+  # change edge color
+  scale_edge_colour_manual(values = c("firebrick4",
+                                      "midnightblue"), # if there are only positive associations 
+                            guide = guide_legend(override.aes = list(linetype = "solid",
+                                                                     colour = "grey50"
+                                                                     )),
+                           name = "Association") +
+  scale_edge_linetype("pointed") +
+  scale_size_continuous(range = c(0.2,8),
+                        breaks = c(10, 20, 50, 100, 200),
+                        name = "Number of sites") +
+  guides(size = guide_legend(order = 2),
+         # colour = "none",
+         alpha = "none") +
+  # change theme  
+  theme_minimal() +
+  theme(legend.position.inside = c(0.88, 0.2), 
+        legend.background = element_rect(fill ="#F2F2F2", colour = "grey20"), 
+        legend.title = element_text(size = 10), 
+        legend.text = element_text(size = 8),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        axis.title = element_blank(),
+        axis.text = element_blank(), 
+        plot.background=element_blank(), 
+        panel.background = element_blank())
+
+my.plot
+
+ggsave(paste0(model_wd, "/Plot_sp_associations_bundle_nsites.png"), 
+       plot = my.plot)
+```
+
+
