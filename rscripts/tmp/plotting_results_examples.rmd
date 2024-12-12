@@ -36,6 +36,403 @@ plotGradient(m, Gradient.tree, pred=predY.tree, measure="S", las=1,
              showData = TRUE, main='Total abundance')
 ```
 
+-----------------------
+More options
+-----------------------
+
+
+# 3. Species Associations plot - A
+
+Hierarchical Edge Bundle, simple approach
+```{r}
+# Libraries
+library(ggraph)
+library(igraph)
+library(tidyverse)
+library(RColorBrewer)
+ 
+# create a data frame giving the hierarchical structure of your individuals
+d1 <- data.frame(from = "origin", to=paste("group", seq(1,10), sep=""))
+d2 <- data.frame(from = rep(d1$to, each = 6), to = unique(associations$sp1))
+edges <- rbind(d1, d2)
+ 
+# create a dataframe with connection between leaves (individuals)
+all_leaves <- unique(associations$sp1)
+connect <- data.frame( from = associations$sp1, 
+                       to = associations$sp2, 
+                       value = associations$mean, 
+                       support = associations$support)
+
+connect <- connect %>% 
+  filter(support < -0.95 | support > 0.95)
+ 
+# create a vertices data.frame. One line per object of our hierarchy
+vertices  <-  data.frame(
+  name = unique(c(as.character(edges$from), as.character(edges$to))) , 
+  value = runif(length(edges$from)+1)
+) 
+# Let's add a column with the group of each name. It will be useful later to color points
+vertices$group  <-  edges$from[ match( vertices$name, edges$to ) ]
+
+
+
+#Let's add information concerning the label we are going to add: angle, horizontal adjustement and potential flip
+#calculate the ANGLE of the labels
+vertices$id <- NA
+myleaves <- which(is.na( match(vertices$name, edges$from) ))
+nleaves <- length(myleaves)
+vertices$id[ myleaves ] <- seq(1:nleaves)
+vertices$angle <- 90 - 360 * vertices$id / nleaves
+ 
+# calculate the alignment of labels: right or left
+# If I am on the left part of the plot, my labels have currently an angle < -90
+vertices$hjust <- ifelse( vertices$angle < -90, 1, 0)
+ 
+# flip angle BY to make them readable
+vertices$angle <- ifelse(vertices$angle < -90, vertices$angle+180, vertices$angle)
+
+
+
+# Create a graph object
+mygraph <- igraph::graph_from_data_frame( edges, vertices=vertices )
+ 
+# The connection object must refer to the ids of the leaves:
+from  <-  match( connect$from, vertices$name)
+to  <-  match( connect$to, vertices$name)
+ 
+# Basic usual argument
+ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+  geom_node_point(aes(filter = leaf, x = x*1.05, y=y*1.05)) +
+  geom_conn_bundle(data = get_con(from = from, to = to, values = connect$value), 
+                   aes(colour = values),
+                   alpha=0.2, 
+                   # colour="skyblue", 
+                   width=0.9) +
+  scale_edge_color_gradient2(low = "red", high = "blue") +
+  geom_node_text(aes(x = x*1.1, y=y*1.1, filter = leaf, label=name, angle = angle, hjust=hjust), size=1.5, alpha=1) +
+  theme_void() +
+  theme(
+    legend.position="none",
+    plot.margin=unit(c(0,0,0,0),"cm"),
+  ) +
+  expand_limits(x = c(-1.6, 1.6), y = c(-1.6, 1.6))
+
+
+ggsave(paste0(model_wd, "/Plot_JSDM_mice_microbiome_bacteria_pa_20240214_spcorrelations.png"))
+
+
+```
+
+# 3. Species Associations plot - B
+
+Plot the species associations categorizing the taxa by some grouping characteristic
+We use a Hierarchical edge bundling plot
+
+To create a bundling graph we need a hierarchy that is going to be used for the dendrogram. 
+We add higher categories to our species, grouping them by env response, that we will use later for plotting
+
+We also need to create the edges: data frame giving the hierarchical structure of the species,
+grouped by species group
+
+
+### Packages
+```{r packages}
+library(ggraph)
+library(igraph)
+library(dplyr)
+library(grid)
+library(png)
+library(sf)
+```
+
+
+```{r load data}
+# Taxa assoc
+associations <- read.csv(paste0(model_wd, "/JSDM_mice_microbiome_bacteria_pa_20240214_sp_associations.csv"))
+head(associations)
+
+# groups
+my_groups <- read.csv(**write file here**)
+
+## create random grouping as example
+# taxa
+my_groups <- data.frame(species = unique(associations$species1))
+# grouping
+my_groups$group <- as.factor(rep(c("one", "two", "three"), times = 20))
+# n sites it was detected
+nsites <- data.frame(species = colnames(m$Y), 
+                     nsites = colSums(m$Y))
+my_groups <- my_groups %>% 
+  left_join(nsites, by = "species")
+
+my_groups
+
+## Get sp names for the plots
+associations$sp1 <- as.character(associations$species1)
+# for (i in 1:length(birds.assoc$sp1)){
+#   names1 <- strsplit(birds.assoc$sp1, '')[[i]][1]
+#   names2 <- strsplit(birds.assoc$sp1, "_")[[i]][2] 
+#   birds.assoc$sp1[i] <- paste(names1, names2, sep=".")
+# }
+
+associations$sp2 <- as.character(associations$species2)
+# for (i in 1:length(birds.assoc$sp2)){
+#   names1 <- strsplit(birds.assoc$sp2, '')[[i]][1]
+#   names2 <- strsplit(birds.assoc$sp2, "_")[[i]][2] 
+#   birds.assoc$sp2[i] <- paste(names1, names2, sep=".")
+# }
+  
+head(associations, 20)  
+
+# sp in traits
+# Trdata$species <- as.character(Trdata$scientific)
+# for (i in 1:length(Trdata$species)){
+#   names1 <- strsplit(Trdata$species, '')[[i]][1]
+#   names2 <- strsplit(Trdata$species, " ")[[i]][2] 
+#   Trdata$species[i] <- paste(names1, names2, sep=".")
+# }
+# head(Trdata)
+
+# Select association that are significant in the 95% CI
+assoc_corr95 <- associations %>%
+  filter(support < 0.025 | support > 0.975) %>%
+  filter(species1 != species2) %>%
+  dplyr::select(from = sp1, to = sp2, mean = mean, support = support) %>%
+  mutate(correl = ifelse(mean < 0, "neg", "pos"))
+
+nrow(assoc_corr95)
+head(assoc_corr95)
+```
+
+```{r prepare hierarchical edge bundling plot}
+# groups
+d1 <- data.frame(from = "origin", to = levels(my_groups$group))
+# d1 <- data.frame(from = "origin", to = levels(as.factor(my_groups$species)))
+
+# Then we assign the species to the groups
+d2 <- data.frame(from = my_groups$species, to = my_groups$species)
+edges <- rbind(d1, d2)
+nrow(edges)
+
+## prepare nodes
+#We use the number of sites that the species was detected for the size of the dots
+vertices <- data.frame(name = unique(c(as.character(edges$from), as.character(edges$to))))
+nrow(vertices)
+
+vertices$size <- c(rep(NA, 4), my_groups$nsites)
+vertices$group = edges$from[match( vertices$name, edges$to )]
+head(vertices, 10)
+
+# Reorder the data following the order we are interested in for representation:
+# so all the species in the same group appear together
+edges.ord <- edges[order(edges$from),]
+vertices.ord <- vertices[order(vertices$group,vertices$name),]
+head(vertices.ord, 10)
+
+## calculate the ANGLE of the labels for plotting
+vertices.ord$id=NA
+myleaves <- which(is.na(match(vertices.ord$name, edges.ord$from))) # Select the rows with the final species, not the groups
+nleaves <- length(myleaves) # This should be the number of species
+vertices.ord$id[myleaves] <- seq(1:nleaves)
+
+# First angle to calculate horizontal adjustment
+vertices.ord$angle <- 90 - 360*vertices.ord$id/nleaves
+
+# calculate the alignment of labels: right or left
+# If I am on the left part of the plot, my labels have currently an angle < -90
+vertices.ord$hjust<-ifelse( vertices.ord$angle < -90, 1, 0)
+
+# flip angle BY to make them readable
+vertices.ord$angle<-ifelse(vertices.ord$angle < -90, vertices.ord$angle+180, vertices.ord$angle)
+
+head(vertices.ord, 10)
+tail(vertices.ord, 10)
+```
+
+```{r create graph object and plot}
+# give data graph format
+mygraph <- graph_from_data_frame(d = edges.ord, vertices = vertices.ord)
+
+# The connection object must refer to the ids of the leaves:
+from <- match(assoc_corr95$from, vertices.ord$name)
+to <- match(assoc_corr95$to, vertices.ord$name)
+
+
+# we transform the correlations into positive or negative to better plot
+connections <- assoc_corr95 %>%
+  mutate (correlation = ifelse(mean > 0, "positive", "negative"))
+connections
+
+# load images
+# bird1 <- readPNG(paste0(Images_wd, "/sparrow_darkgray.png"))
+# g_bird1 <- rasterGrob(bird1, interpolate = TRUE)
+# 
+# bird2 <- readPNG(paste0(Images_wd, "/bird_silhouette1_darkgray.png"))
+# g_bird2 <- rasterGrob(bird2, interpolate = TRUE)
+# 
+# urban <- readPNG(paste0(Images_wd, "/urban_gray.png"))
+# g_urban <- rasterGrob(urban, interpolate = TRUE)
+#  
+# nature <- readPNG(paste0(Images_wd, "/opengreen_green.png"))
+# g_nature <- rasterGrob(nature, interpolate = TRUE)
+#  
+# tree <- readPNG(paste0(Images_wd, "/trees_blue.png"))
+# g_tree <- rasterGrob(tree, interpolate = TRUE)
+
+
+# basic plot
+my.plot <- ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
+  geom_conn_bundle(data = get_con(from = from, to = to, values = connections$correlation), 
+                   alpha=0.2, width=1.2, tension = 0.7, aes(colour=factor(values)), 
+                   show.legend = FALSE) +
+  geom_node_text(aes(x = x*1.2, y=y*1.2, filter = leaf, label = name, angle = angle, 
+                     hjust = hjust, colour = group), size = 3.5, alpha = 0.7) +
+  geom_node_point(aes(filter = leaf, x = x*1.07, y = y*1.07, colour = group, 
+                      size = size, alpha=0.5)) +  
+  expand_limits(x = c(-2, 2.5), y = c(-2, 2)) +
+  # change edge color
+  scale_edge_colour_manual(values = c("firebrick4", "midnightblue"), # there are only positive associations 
+                           guide = guide_legend(override.aes = list(linetype = "solid", 
+                                                                    colour = "grey50")),
+                           name = "Association") +
+  scale_edge_linetype("pointed") +
+  # label color
+  # scale_color_manual(values = c("grey20", "limegreen", "limegreen", "lightseagreen", "steelblue")) +
+  # scale_color_manual(values = c("grey20", "darkgreen", "#FF6000")) +
+    # scale_color_manual(values = c("#d8b365", "#f5f5f5", "#5ab4ac")) + 
+  # label size
+  scale_size_continuous(range = c(0.2,8),
+                        breaks = c(10, 20, 50, 100, 200),
+                        name = "Number of sites") +
+  # labs(title="Species association network", caption="Source: simulated bird JSDM") +
+  guides(size = guide_legend(order = 2), 
+         # edge_colour = guide_legend (order = 1),
+         colour = "none",
+         alpha = "none") +
+  # change theme  
+  theme_minimal() +
+  theme(legend.position = c(0.88, 0.2), 
+        legend.background = element_rect(fill ="#F2F2F2", colour = "grey20"), 
+        legend.title = element_text(size = 10), 
+        legend.text = element_text(size = 8),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        axis.title = element_blank(),
+        axis.text = element_blank(), 
+        plot.background=element_blank(), 
+        panel.background = element_blank())
+
+my.plot
+# Add labels and pictures for diet categories
+my.plot.labels <- my.plot +
+  # add text
+# my.plot +
+  annotate(geom="text", x=1.6, y=1.7, label="Group 1: \nONE",
+           color="grey20", fontface = "bold", size = 4) +
+  # add box around text
+  annotate("rect", xmin = 1.2, xmax = 2, ymin = 1.45, ymax = 1.9,
+           color = "grey20", alpha = .2, fill = "grey20") +
+  annotate(geom="text", x=-2.3, y=1, label="Group 2: \nTWO",
+           color="#FF6000", fontface = "bold", size = 4) +
+  annotate("rect", xmin = -2.8, xmax = -1.75, ymin = 0.8, ymax = 1.2,
+           color = "#FF6000", alpha = .2, fill = "#FF6000") +
+  annotate(geom="text", x=0, y=-2, label="Group 3: \nTHREEs",
+           color="darkgreen", fontface = "bold", size = 4) +
+  annotate("rect", xmin = -0.5, xmax = 0.5, ymin = -2.2, ymax = -1.8,
+           color = "darkgreen", alpha = .2, fill = "darkgreen") 
+  
+# add images
+# final.plot <- my.plot.labels +
+#   annotation_custom(g_urban,
+#                     xmin = 1.2, xmax = 1.55,
+#                     ymin = 1.55, ymax = 2.5) +
+#   annotation_custom(g_tree,
+#                     xmin = -3, xmax = -1.5,
+#                     ymin = 0.3, ymax = 0.7) +
+#   annotation_custom(g_nature,
+#                     xmin = -0.8, xmax = -1.5,
+#                     ymin = -1.6, ymax = -2.3) +
+#   annotation_custom(g_bird1,
+#                     xmin = 2.8, xmax = 2,
+#                     ymin = 0.2, ymax = 1) +
+#   annotation_custom(g_bird2, 
+#                     xmin = 1.5, xmax = 3,
+#                     ymin = -1.2, ymax = -0.2) 
+# 
+#   final.plot
+
+ggsave(paste0(model_wd, "/Plot_associations_bundle_groups_nsites.png"), 
+       plot = my.plot.labels)
+```
+
+
+```{r}
+
+library(ggraph)
+library(tidygraph)
+highschool
+
+my_associations <- associations %>% 
+  dplyr::select(from = sp1, to = sp2, mean, support)
+
+
+my_associations <- my_associations %>% 
+  filter(support > 0.95 | support < -0.95)
+
+graph <- as_tbl_graph(my_associations)
+
+# Not specifying the layout - defaults to "auto"
+ggraph(graph) + 
+  geom_edge_link(aes(colour = mean)) + 
+  geom_node_point()
+
+
+
+set.seed(1234)
+
+nrow(associations)
+
+d1 <- data.frame(from = "origin", to = paste("group", seq(1,10), sep=""))
+d2 <- data.frame(from = rep(d1$to, each = 6), to = unique(associations$sp1))
+hierarchy <- rbind(d1, d2)
+ 
+# create a dataframe with connection between leaves (individuals)
+all_leaves <- unique(associations$sp1)
+connect <- data.frame(from = associations$sp1, to = associations$sp2, value = associations$mean)
+  
+# create a vertices data.frame. One line per object of our hierarchy
+vertices  <-  data.frame(
+  name = unique(c(as.character(hierarchy$from), as.character(hierarchy$to))) , 
+  value = runif(71)
+) 
+# Let's add a column with the group of each name. It will be useful later to color points
+vertices$group  <-  hierarchy$from[ match( vertices$name, hierarchy$to ) ]
+ 
+ 
+# Create a graph object
+mygraph <- graph_from_data_frame( hierarchy, vertices=vertices )
+ 
+# The connection object must refer to the ids of the leaves:
+from  <-  match( connect$from, vertices$name)
+to  <-  match( connect$to, vertices$name)
+ 
+
+
+# create a dataframe with connection between leaves (individuals)
+all_leaves <- unique(associations$sp1)
+connect <- data.frame(from = associations$sp1, to = associations$sp2, value = associations$mean)
+ 
+# The connection object must refer to the ids of the leaves:
+from <- match( connect$from, vertices$name)
+to <- match( connect$to, vertices$name)
+
+# plot
+ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+  geom_conn_bundle(data = get_con(from = from, to = to), alpha=0.2, colour="skyblue", tension = 0.9) + 
+  geom_node_point(aes(filter = leaf, x = x*1.05, y=y*1.05)) +
+  theme_void()
+```
+
 ### Predicted responses 95CI by species
 
 ```{r}
